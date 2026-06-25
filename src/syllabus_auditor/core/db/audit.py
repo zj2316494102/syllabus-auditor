@@ -16,6 +16,16 @@ from syllabus_auditor.core.audit import (
 from syllabus_auditor.core.db.connection import build_dsn
 
 
+CORE_AUDIT_DIMENSIONS = (
+    "kcjbxxsfykckyz",
+    "jxnrsfyxspp",
+    "jxapsfyzcpp",
+    "jxmbnrfsfhyq",
+    "szysfyxrghj",
+    "xxyzwzfhmb",
+)
+
+
 class AuditStore:
     def list_subjects(self, *, latest_only: bool = True) -> list[AuditSubject]:
         query = """
@@ -289,6 +299,8 @@ class AuditStore:
     def complete_run(self, summary: AuditRunSummary) -> None:
         with psycopg.connect(build_dsn()) as conn:
             with conn.cursor() as cur:
+                metrics = self._compute_run_metrics(cur, summary.run_id)
+                self._save_run_metrics(cur, summary.run_id, metrics)
                 cur.execute(
                     """
                     UPDATE audit_runs
@@ -307,6 +319,7 @@ class AuditStore:
                                 "partial_count": summary.partial_count,
                                 "error_count": summary.error_count,
                                 "skipped_count": summary.skipped_count,
+                                "metrics": metrics,
                             },
                             ensure_ascii=False,
                         ),
@@ -314,6 +327,164 @@ class AuditStore:
                     ),
                 )
             conn.commit()
+
+    def _compute_run_metrics(self, cur: Any, run_id: int) -> dict[str, Any]:
+        total_courses = self._scalar(cur, "SELECT COUNT(*) FROM audit_results WHERE run_id = %s", (run_id,))
+        dimension_count = len(CORE_AUDIT_DIMENSIONS)
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM (
+                SELECT ar.id
+                FROM audit_results ar
+                LEFT JOIN audit_findings af
+                  ON af.result_id = ar.id
+                 AND af.wd = ANY(%s)
+                WHERE ar.run_id = %s
+                GROUP BY ar.id
+                HAVING COUNT(af.id) = %s
+                   AND COUNT(*) FILTER (WHERE af.status = 'pass') = %s
+            ) passed
+            """,
+            (list(CORE_AUDIT_DIMENSIONS), run_id, dimension_count, dimension_count),
+        )
+        all_dimensions_pass_count = int(cur.fetchone()[0] or 0)
+
+        cur.execute(
+            """
+            SELECT wd,
+                   COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE status = 'pass') AS pass_count,
+                   COUNT(*) FILTER (WHERE status <> 'pass') AS fail_count
+            FROM audit_findings
+            WHERE run_id = %s
+              AND wd = ANY(%s)
+            GROUP BY wd
+            """,
+            (run_id, list(CORE_AUDIT_DIMENSIONS)),
+        )
+        dimension_rows = cur.fetchall()
+        dimension_pass_rates = {}
+        by_wd = {str(row[0]): row for row in dimension_rows}
+        for wd in CORE_AUDIT_DIMENSIONS:
+            row = by_wd.get(wd)
+            total = int(row[1] or 0) if row else 0
+            pass_count = int(row[2] or 0) if row else 0
+            fail_count = int(row[3] or 0) if row else 0
+            dimension_pass_rates[wd] = {
+                "total": total,
+                "pass_count": pass_count,
+                "fail_count": fail_count,
+                "pass_rate": _rate(pass_count, total),
+            }
+
+        cur.execute(
+            """
+            SELECT reason, COUNT(*) AS count
+            FROM audit_field_findings
+            WHERE run_id = %s
+              AND status <> 'pass'
+              AND COALESCE(reason, '') <> ''
+            GROUP BY reason
+            ORDER BY count DESC, reason
+            LIMIT 10
+            """,
+            (run_id,),
+        )
+        reason_top10 = [{"reason": str(row[0]), "count": int(row[1] or 0)} for row in cur.fetchall()]
+
+        cur.execute(
+            """
+            SELECT section, field, path, reason, COUNT(*) AS count
+            FROM audit_field_findings
+            WHERE run_id = %s
+              AND status <> 'pass'
+              AND (
+                    reason LIKE '%%为空%%'
+                 OR reason LIKE '%%字段缺失%%'
+                 OR reason LIKE '%%缺失%%'
+              )
+            GROUP BY section, field, path, reason
+            ORDER BY count DESC, section, field, reason
+            LIMIT 10
+            """,
+            (run_id,),
+        )
+        missing_field_top10 = [
+            {
+                "section": str(row[0]),
+                "field": str(row[1]),
+                "path": str(row[2]),
+                "reason": str(row[3]),
+                "count": int(row[4] or 0),
+            }
+            for row in cur.fetchall()
+        ]
+
+        cur.execute(
+            """
+            SELECT COUNT(DISTINCT result_id)
+            FROM audit_field_findings
+            WHERE run_id = %s
+              AND (
+                    reason LIKE '%%需人工复核%%'
+                 OR message LIKE '%%需人工复核%%'
+                 OR reason LIKE '%%无法定位课程库记录%%'
+                 OR message LIKE '%%无法定位课程库记录%%'
+              )
+            """,
+            (run_id,),
+        )
+        manual_review_course_count = int(cur.fetchone()[0] or 0)
+
+        cur.execute(
+            """
+            SELECT COALESCE(call->>'status', '') AS status, COUNT(*) AS count
+            FROM audit_findings af
+            CROSS JOIN LATERAL jsonb_array_elements(COALESCE(af.llm_trace->'calls', '[]'::jsonb)) call
+            WHERE af.run_id = %s
+              AND COALESCE(call->>'status', '') IN ('parse_error', 'no_llm')
+            GROUP BY COALESCE(call->>'status', '')
+            """,
+            (run_id,),
+        )
+        llm_status_counts = {str(row[0]): int(row[1] or 0) for row in cur.fetchall()}
+        llm_exception_count = sum(llm_status_counts.values())
+
+        return {
+            "overall_pass_rate": {
+                "total": total_courses,
+                "pass_count": all_dimensions_pass_count,
+                "fail_count": max(total_courses - all_dimensions_pass_count, 0),
+                "pass_rate": _rate(all_dimensions_pass_count, total_courses),
+                "dimension_count": dimension_count,
+                "dimensions": list(CORE_AUDIT_DIMENSIONS),
+            },
+            "dimension_pass_rates": dimension_pass_rates,
+            "reason_top10": reason_top10,
+            "missing_field_top10": missing_field_top10,
+            "manual_review_course_count": manual_review_course_count,
+            "llm_exception_count": llm_exception_count,
+            "llm_status_counts": llm_status_counts,
+        }
+
+    def _save_run_metrics(self, cur: Any, run_id: int, metrics: dict[str, Any]) -> None:
+        rows = [(run_id, key, json.dumps(value, ensure_ascii=False)) for key, value in metrics.items()]
+        cur.executemany(
+            """
+            INSERT INTO audit_run_metrics (run_id, metric_key, metric_value)
+            VALUES (%s, %s, %s::jsonb)
+            ON CONFLICT (run_id, metric_key)
+            DO UPDATE SET
+                metric_value = EXCLUDED.metric_value,
+                updated_at = NOW()
+            """,
+            rows,
+        )
+
+    def _scalar(self, cur: Any, query: str, params: tuple[Any, ...]) -> int:
+        cur.execute(query, params)
+        return int(cur.fetchone()[0] or 0)
 
     def fail_run(self, *, run_id: int, error_message: str) -> None:
         with psycopg.connect(build_dsn()) as conn:
@@ -345,3 +516,8 @@ def _json_dump(value: Any) -> str:
         value = {}
     return json.dumps(value, ensure_ascii=False)
 
+
+def _rate(count: int, total: int) -> float:
+    if total <= 0:
+        return 0.0
+    return round(count / total, 4)

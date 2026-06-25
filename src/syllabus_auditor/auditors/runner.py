@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from syllabus_auditor.auditors.jxmbnrfsfhyq import audit_jxmbnrfsfhyq
 from syllabus_auditor.auditors.szysfyxrghj import audit_szysfyxrghj
+from syllabus_auditor.auditors.xxyzwzfhmb import audit_xxyzwzfhmb
 from syllabus_auditor.core.audit import AuditRunSummary, audit_subject, build_run_name, refresh_subject_audit
 from syllabus_auditor.core.db.audit import AuditStore
 from syllabus_auditor.core.llm import load_llm_client
@@ -13,6 +14,7 @@ DEFAULT_AUDITORS = [
     "jxapsfyzcpp",
     "jxmbnrfsfhyq",
     "szysfyxrghj",
+    "xxyzwzfhmb",
     "kcmb",
     "jxnr",
     "jxap",
@@ -45,6 +47,7 @@ def run_batch_audit(
                 "jxapsfyzcpp": {"type": "rule"},
                 "jxmbnrfsfhyq": {"type": "direct_llm", "enabled": llm_client is not None},
                 "szysfyxrghj": {"type": "direct_llm", "enabled": llm_client is not None},
+                "xxyzwzfhmb": {"type": "rule"},
             },
             "field_results": "all",
         },
@@ -66,6 +69,9 @@ def run_batch_audit(
             sz_section, sz_fields = audit_szysfyxrghj(subject, llm_client)
             audit.section_findings.append(sz_section)
             audit.field_findings.extend(sz_fields)
+            xx_section, xx_fields = audit_xxyzwzfhmb(subject)
+            audit.section_findings.append(xx_section)
+            audit.field_findings.extend(xx_fields)
             refresh_subject_audit(audit)
             store.save_subject_audit(run_id=run_id, audit=audit)
 

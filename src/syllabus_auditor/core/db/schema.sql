@@ -275,4 +275,18 @@ CREATE INDEX IF NOT EXISTS idx_audit_artifacts_run_id ON public.audit_artifacts 
 CREATE INDEX IF NOT EXISTS idx_audit_artifacts_finding_id ON public.audit_artifacts (finding_id);
 CREATE INDEX IF NOT EXISTS idx_audit_artifacts_type ON public.audit_artifacts (artifact_type);
 
+-- 11. audit_run_metrics
+CREATE TABLE IF NOT EXISTS public.audit_run_metrics (
+    id                   BIGSERIAL PRIMARY KEY,
+    run_id               BIGINT NOT NULL REFERENCES public.audit_runs (id) ON DELETE CASCADE,
+    metric_key           TEXT NOT NULL,
+    metric_value         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT audit_run_metrics_run_key_unique UNIQUE (run_id, metric_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_run_metrics_run_id ON public.audit_run_metrics (run_id);
+CREATE INDEX IF NOT EXISTS idx_audit_run_metrics_key ON public.audit_run_metrics (metric_key);
+
 COMMIT;

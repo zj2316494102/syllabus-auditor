@@ -17,6 +17,7 @@ EXPECTED_TABLES = frozenset(
         "audit_field_findings",
         "audit_findings",
         "audit_results",
+        "audit_run_metrics",
         "audit_runs",
         "courses",
         "reference_chunks",
