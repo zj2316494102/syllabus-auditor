@@ -13,16 +13,17 @@ from syllabus_auditor.core.audit import (
     build_subject_key,
     extract_course_name_from_source_path,
 )
+from syllabus_auditor.core.audit_labels import audit_wd_label
 from syllabus_auditor.core.db.connection import build_dsn
 
 
 CORE_AUDIT_DIMENSIONS = (
-    "kcjbxxsfykckyz",
-    "jxnrsfyxspp",
-    "jxapsfyzcpp",
-    "jxmbnrfsfhyq",
-    "szysfyxrghj",
-    "xxyzwzfhmb",
+    audit_wd_label("kcjbxxsfykckyz"),
+    audit_wd_label("jxnrsfyxspp"),
+    audit_wd_label("jxapsfyzcpp"),
+    audit_wd_label("jxmbnrfsfhyq"),
+    audit_wd_label("szysfyxrghj"),
+    audit_wd_label("xxyzwzfhmb"),
 )
 
 
@@ -200,6 +201,11 @@ class AuditStore:
 
     def save_subject_audit(self, *, run_id: int, audit: SubjectAudit) -> int:
         subject = audit.subject
+        dimension_findings = [
+            finding
+            for finding in audit.section_findings
+            if audit_wd_label(finding.wd) in CORE_AUDIT_DIMENSIONS
+        ]
         with psycopg.connect(build_dsn()) as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -223,7 +229,7 @@ class AuditStore:
                         subject.source_path,
                         audit.overall_status,
                         None,
-                        len(audit.section_findings),
+                        len(dimension_findings),
                         audit.fail_count,
                         audit.warning_count,
                         json.dumps(audit.summary, ensure_ascii=False),
@@ -281,7 +287,7 @@ class AuditStore:
                             run_id,
                             result_id,
                             subject.course_code,
-                            finding.wd,
+                            audit_wd_label(finding.wd),
                             finding.pdfs,
                             finding.status,
                             finding.message,
@@ -290,7 +296,7 @@ class AuditStore:
                             _json_dump(finding.details),
                             _json_dump(finding.llm_trace),
                         )
-                        for finding in audit.section_findings
+                        for finding in dimension_findings
                     ],
                 )
             conn.commit()

@@ -1,79 +1,24 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
 from typing import Any
 
+from config import load_project_config
 from syllabus_auditor.core.types import ExtractionRaw
 
-JCXX_FIELD_MAP = {
-    "课程编号": "kcbh",
-    "开课（院）系": "kkyx",
-    "中文课程名称": "zwkcmc",
-    "英文课程名称": "ywkcmc",
-    "授课语言": "skyy",
-    "是否允许外学院选课": "sfyxwxyxk",
-    "考核方式": "khfs",
-    "课程性质": "kcxz",
-    "课程类别": "kclb",
-    "周学时": "zxs",
-    "上课周数": "skzs",
-    "总学时": "zongxs",
-    "教学学时": "jxxs",
-    "实验学时": "syxs",
-    "实践学时": "sjxs",
-    "其他学时": "qtxs",
-    "自学学时": "zxxs",
-    "课程学分": "kcxf",
-    "任课教师姓名": "rkjsxm",
-    "教师工号": "jsgh",
-    "E-mail": "email",
-    "联系电话": "lxdh",
-}
 
-CONTENT_ITEM_MAP = {
-    "序号": "xh",
-    "主题": "zt",
-    "知识点": "zsd",
-    "学时": "xs",
-}
+def _payload_config() -> dict[str, Any]:
+    value = load_project_config().get("payload", {})
+    return value if isinstance(value, dict) else {}
 
-SCHEDULE_ITEM_MAP = {
-    "序号": "zs",
-    "授课内容": "sknr",
-    "授课方式": "skfs",
-    "作业": "zy",
-    "思政元素的融入和预期教学成效": "szyqjxx",
-}
 
-ASSESSMENT_ITEM_MAP = {
-    "考试形式": "ksxs",
-    "考察内容": "kcnr",
-    "考察方式": "kcfs",
-    "占比": "zb",
-}
-
-REQUIREMENT_ITEM_MAP = {
-    "要求类型": "yqlx",
-    "要求内容": "yqnr",
-    "作业要求": "zyyq",
-    "考勤要求": "kqyq",
-    "阅读要求": "ydyq",
-}
-
-EMPTY_MARKERS = {
-    "",
-    "不填",
-    "未填",
-    "无",
-    "暂无",
-    "无特殊要求",
-    "无特殊",
-    "none",
-    "null",
-    "n/a",
-    "na",
-}
-
+JCXX_FIELD_MAP = dict(_payload_config().get("jcxx_field_map") or {})
+CONTENT_ITEM_MAP = dict(_payload_config().get("content_item_map") or {})
+SCHEDULE_ITEM_MAP = dict(_payload_config().get("schedule_item_map") or {})
+ASSESSMENT_ITEM_MAP = dict(_payload_config().get("assessment_item_map") or {})
+REQUIREMENT_ITEM_MAP = dict(_payload_config().get("requirement_item_map") or {})
+EMPTY_MARKERS = {str(item).lower() for item in (_payload_config().get("empty_markers") or [])}
+TOTAL_HOURS_PATTERNS = [str(item) for item in (_payload_config().get("total_hours_patterns") or [])]
 COURSE_CODE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$")
 
 
@@ -119,13 +64,7 @@ def _map_row(row: dict[str, Any], mapping: dict[str, str]) -> dict[str, Any]:
 
 
 def _extract_total_hours(full_text: str, teaching_content: list[dict[str, Any]]) -> str:
-    patterns = [
-        r"课时总计[：:]\s*(\d+)\s*学时",
-        r"学时总计[：:]\s*(\d+)\s*学时",
-        r"课时总计[：:]\s*学时\s*(\d+)",
-        r"总学时[：:]\s*(\d+)",
-    ]
-    for pattern in patterns:
+    for pattern in TOTAL_HOURS_PATTERNS:
         match = re.search(pattern, full_text)
         if match:
             return match.group(1)
@@ -194,10 +133,11 @@ def build_payload(raw: ExtractionRaw) -> dict[str, Any]:
     course_requirement_text = _clean_value(cn.get("课程要求", ""))
     if requirement_items:
         kcyqb: dict[str, Any] = {"tm": requirement_items, "yqgs": "", "kzzd": []}
+        course_requirement_text = ""
     else:
         kcyqb = {"tm": [], "yqgs": "", "kzzd": []}
 
-    payload: dict[str, Any] = {
+    return {
         "jcxx": jcxx,
         "kczwjj": _clean_value(cn.get("课程中文简介", "")),
         "kcywjj": _clean_value(cn.get("课程英文简介", "")),
@@ -210,4 +150,4 @@ def build_payload(raw: ExtractionRaw) -> dict[str, Any]:
         "kcyqb": kcyqb,
         "khfsb": khfsb,
     }
-    return payload
+

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import re
@@ -6,33 +6,29 @@ from typing import Any, Protocol
 
 from syllabus_auditor.auditors.szysfyxrghj_prompt import build_prompt
 from syllabus_auditor.core.audit import FAIL, PASS, AuditSubject, FieldFinding, SectionFinding
+from config import load_project_config
 from syllabus_auditor.core.llm import build_llm_trace
 
 
 DIMENSION = "szysfyxrghj"
-DIMENSION_LABEL = "是否将思政元素有效融入各环节"
+DIMENSION_LABEL = "\u662f\u5426\u5c06\u601d\u653f\u5143\u7d20\u6709\u6548\u878d\u5165\u5404\u73af\u8282"
 FIELD = "szyr"
-FIELD_LABEL = "思政元素融入"
-FALLBACK_REASON = "模型未给出不通过原因，需人工复核"
-NO_LLM_REASON = "未配置 LLM，无法审核是否将思政元素有效融入各环节，需人工复核"
-PARSE_ERROR_REASON = "模型输出格式无法解析，需人工复核"
+FIELD_LABEL = "\u601d\u653f\u5143\u7d20\u878d\u5165"
+YES = "\u662f"
+NO = "\u5426"
+FALLBACK_REASON = "\u6a21\u578b\u672a\u7ed9\u51fa\u4e0d\u901a\u8fc7\u539f\u56e0\uff0c\u9700\u4eba\u5de5\u590d\u6838"
+NO_LLM_REASON = "\u672a\u914d\u7f6e LLM\uff0c\u65e0\u6cd5\u5ba1\u6838\u662f\u5426\u5c06\u601d\u653f\u5143\u7d20\u6709\u6548\u878d\u5165\u5404\u73af\u8282\uff0c\u9700\u4eba\u5de5\u590d\u6838"
+PARSE_ERROR_REASON = "\u6a21\u578b\u8f93\u51fa\u683c\u5f0f\u65e0\u6cd5\u89e3\u6790\uff0c\u9700\u4eba\u5de5\u590d\u6838"
 
-GOAL_SECTION_HINTS = ("课程目标", "教学目标", "思政目标", "课程思政目标", "价值目标", "育人目标")
-ARRANGEMENT_SECTION_HINTS = ("教学安排", "课程安排", "授课安排", "教学进度", "课程思政", "思政元素", "思政元素融入")
-IDEOLOGY_KEYWORDS = (
-    "思政",
-    "立德树人",
-    "价值引领",
-    "价值观",
-    "责任感",
-    "使命感",
-    "家国情怀",
-    "职业伦理",
-    "社会责任",
-    "诚信",
-    "法治",
-    "职业道德",
-)
+def _dimension_config() -> dict[str, Any]:
+    audit_config = load_project_config().get("audit", {})
+    value = audit_config.get("szysfyxrghj_meta", {}) if isinstance(audit_config, dict) else {}
+    return value if isinstance(value, dict) else {}
+
+
+GOAL_SECTION_HINTS = tuple(str(item) for item in _dimension_config().get("goal_section_hints", []))
+ARRANGEMENT_SECTION_HINTS = tuple(str(item) for item in _dimension_config().get("arrangement_section_hints", []))
+IDEOLOGY_KEYWORDS = tuple(str(item) for item in _dimension_config().get("ideology_keywords", []))
 
 
 class JsonLlmClient(Protocol):
@@ -142,66 +138,31 @@ def parse_llm_json(text: str) -> dict[str, Any]:
 
 def normalize_llm_result(result: dict[str, Any], llm_trace: dict[str, Any] | None = None) -> dict[str, Any]:
     checks = _normalize_checks(result.get("checks"))
-    normalized = {
-        "dimension": DIMENSION,
-        "label": str(result.get("label") or DIMENSION_LABEL),
-        "result": _result_value(result.get("result")),
-        "reasons": _string_list(result.get("reasons")),
-        "checks": checks,
-        "evidence_paths": _string_list(result.get("evidence_paths")),
-        "suggestion": str(result.get("suggestion") or ""),
-        "llm_trace": llm_trace or _as_dict(result.get("llm_trace")),
-    }
-    if any(check["result"] == "否" for check in checks.values()):
-        normalized["result"] = "否"
-    if normalized["result"] == "否" and not normalized["reasons"]:
-        normalized["reasons"] = _check_reasons(checks) or [FALLBACK_REASON]
+    normalized = {"dimension": DIMENSION, "label": str(result.get("label") or DIMENSION_LABEL), "result": _result_value(result.get("result")), "reasons": _string_list(result.get("reasons")), "checks": checks, "evidence_paths": _string_list(result.get("evidence_paths")), "suggestion": str(result.get("suggestion") or ""), "llm_trace": llm_trace or _as_dict(result.get("llm_trace"))}
+    if any(check["result"] == NO for check in checks.values()):
+        normalized["result"] = NO
     for check_key, check in checks.items():
-        if check["result"] == "否" and not check["reason"]:
-            check["reason"] = f"{_check_label(check_key)}未通过，模型未给出具体原因，需人工复核"
+        if check["result"] == NO and not check["reason"]:
+            check["reason"] = f"{_check_label(check_key)}\u672a\u901a\u8fc7\uff0c\u6a21\u578b\u672a\u7ed9\u51fa\u5177\u4f53\u539f\u56e0\uff0c\u9700\u4eba\u5de5\u590d\u6838"
+    if normalized["result"] == NO:
+        normalized["reasons"] = _merge_reasons(normalized["reasons"], _check_reasons(checks)) or [FALLBACK_REASON]
     return normalized
 
 
 def build_findings(result: dict[str, Any], audit_input: dict[str, Any]) -> tuple[SectionFinding, list[FieldFinding]]:
     result = normalize_llm_result(result, _as_dict(result.get("llm_trace")))
-    is_pass = result["result"] == "是"
+    is_pass = result["result"] == YES
     status = PASS if is_pass else FAIL
     reasons = _string_list(result.get("reasons"))
-    reason = "；".join(reasons)
+    reason = "\uff1b".join(reasons)
     evidence = {
         "evidence_paths": result["evidence_paths"],
         "checks": result["checks"],
         "meta_context_used": bool((audit_input.get("meta_context") or {}).get("raw_text_segments")),
         "fallback_flags": (audit_input.get("meta_context") or {}).get("fallback_flags") or {},
     }
-    section = SectionFinding(
-        wd=DIMENSION,
-        status=status,
-        message=result["result"],
-        evidence=evidence,
-        suggestion=result["suggestion"] if not is_pass else "",
-        details={
-            "label": DIMENSION_LABEL,
-            "result": result["result"],
-            "reasons": reasons,
-            "checks": result["checks"],
-        },
-        pdfs="direct_llm",
-        llm_trace=_as_dict(result.get("llm_trace")),
-    )
-    field = FieldFinding(
-        section=DIMENSION,
-        field=FIELD,
-        path=f"llm.{DIMENSION}.{FIELD}",
-        status=status,
-        reason="" if is_pass else reason or FALLBACK_REASON,
-        message=result["result"] if is_pass else reason or FALLBACK_REASON,
-        expected={"requirement": DIMENSION_LABEL},
-        actual={"result": result["result"], "checks": result["checks"]},
-        evidence=evidence,
-        suggestion=result["suggestion"] if not is_pass else "",
-        llm_trace=_as_dict(result.get("llm_trace")),
-    )
+    section = SectionFinding(wd=DIMENSION, status=status, message=result["result"], evidence=evidence, suggestion=result["suggestion"] if not is_pass else "", details={"label": DIMENSION_LABEL, "result": result["result"], "reasons": reasons, "checks": result["checks"]}, pdfs="direct_llm", llm_trace=_as_dict(result.get("llm_trace")))
+    field = FieldFinding(section=DIMENSION, field=FIELD, path=f"llm.{DIMENSION}.{FIELD}", status=status, reason="" if is_pass else reason or FALLBACK_REASON, message=result["result"] if is_pass else reason or FALLBACK_REASON, expected={"requirement": DIMENSION_LABEL}, actual={"result": result["result"], "checks": result["checks"]}, evidence=evidence, suggestion=result["suggestion"] if not is_pass else "", llm_trace=_as_dict(result.get("llm_trace")))
     return section, [field]
 
 
@@ -254,15 +215,15 @@ def _manual_result(reason: str, llm_trace: dict[str, Any]) -> dict[str, Any]:
     return {
         "dimension": DIMENSION,
         "label": DIMENSION_LABEL,
-        "result": "否",
+        "result": NO,
         "reasons": [reason],
         "checks": {
-            "has_ideological_goal": {"result": "否", "reason": reason, "evidence_paths": []},
-            "has_arrangement_integration": {"result": "否", "reason": reason, "evidence_paths": []},
-            "is_effectively_integrated": {"result": "否", "reason": reason, "evidence_paths": []},
+            "has_ideological_goal": {"result": NO, "reason": reason, "evidence_paths": []},
+            "has_arrangement_integration": {"result": NO, "reason": reason, "evidence_paths": []},
+            "is_effectively_integrated": {"result": NO, "reason": reason, "evidence_paths": []},
         },
         "evidence_paths": [],
-        "suggestion": "配置 LLM 后重新审核，或进行人工复核。",
+        "suggestion": "\u914d\u7f6e LLM \u540e\u91cd\u65b0\u5ba1\u6838\uff0c\u6216\u8fdb\u884c\u4eba\u5de5\u590d\u6838\u3002",
         "llm_trace": llm_trace,
     }
 
@@ -357,7 +318,10 @@ def _meta_text_sources(meta: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def _result_value(value: Any) -> str:
-    return "是" if str(value).strip() == "是" else "否"
+    text = str(value or "").strip().lower()
+    if text in {YES, "yes", "pass", "passed", "true", "1"} or text.startswith("\u93c4"):
+        return YES
+    return NO
 
 
 def _string_list(value: Any) -> list[str]:
@@ -369,29 +333,29 @@ def _string_list(value: Any) -> list[str]:
 
 
 def _check_reasons(checks: dict[str, dict[str, Any]]) -> list[str]:
-    return [item["reason"] for item in checks.values() if item.get("result") == "否" and item.get("reason")]
+    reasons = [str(item.get("reason") or "").strip() for item in checks.values() if item.get("result") == NO]
+    return _merge_reasons(reasons)
+
+
+def _merge_reasons(*groups: list[str]) -> list[str]:
+    seen: set[str] = set()
+    merged: list[str] = []
+    for group in groups:
+        for reason in group:
+            text = str(reason or "").strip()
+            if text and text not in seen:
+                seen.add(text)
+                merged.append(text)
+    return merged
 
 
 def _check_label(key: str) -> str:
     labels = {
-        "has_ideological_goal": "课程目标中的思政目标",
-        "has_arrangement_integration": "教学安排中的思政融入",
-        "is_effectively_integrated": "思政元素有效融入各环节",
+        "has_ideological_goal": "\u601d\u653f\u76ee\u6807",
+        "has_arrangement_integration": "\u6559\u5b66\u5b89\u6392\u4e2d\u7684\u601d\u653f\u878d\u5165",
+        "is_effectively_integrated": "\u601d\u653f\u76ee\u6807\u4e0e\u6559\u5b66\u5b89\u6392\u7684\u547c\u5e94\u5173\u7cfb",
     }
     return labels.get(key, key)
-
-
-def _has_ideology_keyword(text: str) -> bool:
-    return any(keyword in text for keyword in IDEOLOGY_KEYWORDS)
-
-
-def _looks_template_text(text: str) -> bool:
-    stripped = _exact_value(text)
-    return stripped in {"无", "暂无", "无。", "待补充", "课程思政", "思政元素", "融入思政元素"}
-
-
-def _compact_text(text: str) -> str:
-    return re.sub(r"\s+", " ", _exact_value(text)).strip()
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -403,7 +367,9 @@ def _as_list(value: Any) -> list[Any]:
 
 
 def _exact_value(value: Any) -> str:
-    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(value or "")).strip()
+    text = str(value or "")
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
+    return text.strip()
 
 
 def _normalize_kzzd(value: Any) -> dict[str, Any] | list[Any] | str:
@@ -412,3 +378,27 @@ def _normalize_kzzd(value: Any) -> dict[str, Any] | list[Any] | str:
     if isinstance(value, list):
         return value
     return _exact_value(value)
+
+
+def _compact_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+def _has_ideology_keyword(text: str) -> bool:
+    return any(keyword in text for keyword in IDEOLOGY_KEYWORDS)
+
+
+def _looks_template_text(text: str) -> bool:
+    compact = _compact_text(text)
+    if not compact:
+        return True
+    placeholders = (
+        "\u8bf7\u586b\u5199",
+        "\u5f85\u586b\u5199",
+        "\u65e0",
+        "N/A",
+        "NA",
+    )
+    return compact in placeholders or len(compact) < 4
+
+

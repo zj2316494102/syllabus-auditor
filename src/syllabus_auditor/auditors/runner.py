@@ -1,26 +1,35 @@
-from __future__ import annotations
+﻿from __future__ import annotations
+
+from typing import Any
 
 from syllabus_auditor.auditors.jxmbnrfsfhyq import audit_jxmbnrfsfhyq
 from syllabus_auditor.auditors.szysfyxrghj import audit_szysfyxrghj
 from syllabus_auditor.auditors.xxyzwzfhmb import audit_xxyzwzfhmb
 from syllabus_auditor.core.audit import AuditRunSummary, audit_subject, build_run_name, refresh_subject_audit
+from config import load_project_config
 from syllabus_auditor.core.db.audit import AuditStore
 from syllabus_auditor.core.llm import load_llm_client
 
 
-DEFAULT_AUDITORS = [
-    "kcjbxxsfykckyz",
-    "jxnrsfyxspp",
-    "jxapsfyzcpp",
-    "jxmbnrfsfhyq",
-    "szysfyxrghj",
-    "xxyzwzfhmb",
-    "kcmb",
-    "jxnr",
-    "jxap",
-    "kcyq",
-    "khfsb",
-]
+def _audit_config() -> dict[str, Any]:
+    value = load_project_config().get("audit", {})
+    return value if isinstance(value, dict) else {}
+
+
+def _default_auditors() -> list[str]:
+    value = _audit_config().get("default_auditors", [])
+    return [str(item) for item in value] if isinstance(value, list) else []
+
+
+def _audit_modes(llm_enabled: bool) -> dict[str, Any]:
+    modes = dict(_audit_config().get("audit_modes") or {})
+    for value in modes.values():
+        if isinstance(value, dict) and value.get("type") == "direct_llm":
+            value["enabled"] = llm_enabled
+    return modes
+
+
+DEFAULT_AUDITORS = _default_auditors()
 
 
 def run_batch_audit(
@@ -33,22 +42,16 @@ def run_batch_audit(
     store = store or AuditStore()
     llm_client = load_llm_client()
     subjects = store.list_subjects(latest_only=latest_only)
+    auditors = _default_auditors()
     run_id = store.create_run(
         run_name=run_name or build_run_name(),
         import_term=import_term,
-        auditors=DEFAULT_AUDITORS,
+        auditors=auditors,
         config_snapshot={
             "version": 1,
             "latest_only": latest_only,
-            "auditors": DEFAULT_AUDITORS,
-            "audit_modes": {
-                "kcjbxxsfykckyz": {"type": "rule"},
-                "jxnrsfyxspp": {"type": "rule"},
-                "jxapsfyzcpp": {"type": "rule"},
-                "jxmbnrfsfhyq": {"type": "direct_llm", "enabled": llm_client is not None},
-                "szysfyxrghj": {"type": "direct_llm", "enabled": llm_client is not None},
-                "xxyzwzfhmb": {"type": "rule"},
-            },
+            "auditors": auditors,
+            "audit_modes": _audit_modes(llm_client is not None),
             "field_results": "all",
         },
         course_total=len(subjects),
@@ -97,3 +100,4 @@ def run_batch_audit(
     except Exception as exc:
         store.fail_run(run_id=run_id, error_message=f"{type(exc).__name__}: {exc}")
         raise
+

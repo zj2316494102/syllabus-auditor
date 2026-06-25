@@ -1,9 +1,10 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
 from typing import Any
 
 from syllabus_auditor.core.audit import FAIL, PASS, AuditSubject, FieldFinding, SectionFinding
+from config import load_project_config
 
 
 DIMENSION = "xxyzwzfhmb"
@@ -11,73 +12,34 @@ DIMENSION_LABEL = "信息要素完整、符合模板、是否有中英文简介"
 MBXXYZWZ = "mbxxyzwz"
 ZYWJJ = "zywjj"
 
-NORMAL_BASIC_FIELDS = (
-    ("kcbh", "课程编号"),
-    ("kkyx", "开课（院）系"),
-    ("zwkcmc", "中文课程名称"),
-    ("ywkcmc", "英文课程名称"),
-    ("skyy", "授课语言"),
-    ("sfyxwxyxk", "是否允许外学院选课"),
-    ("khfs", "考核方式"),
-    ("kcxz", "课程性质"),
-    ("kclb", "课程类别"),
-    ("zxs", "周学时"),
-    ("skzs", "上课周数"),
-    ("zongxs", "总学时"),
-    ("jxxs", "教学学时"),
-    ("kcxf", "课程学分"),
-    ("rkjsxm", "任课教师姓名"),
-    ("jsgh", "教师工号"),
-    ("email", "E-mail"),
-    ("lxdh", "联系电话"),
-)
+def _template_config() -> dict[str, Any]:
+    audit_config = load_project_config().get("audit", {})
+    value = audit_config.get("xxyzwzfhmb_template", {}) if isinstance(audit_config, dict) else {}
+    return value if isinstance(value, dict) else {}
 
-SPECIAL_BASIC_FIELDS = (
-    ("syxs", "实验学时"),
-    ("sjxs", "实践学时"),
-    ("qtxs", "其他学时"),
-    ("zxxs", "自学学时"),
-)
 
-TOP_LEVEL_FIELDS = (
-    ("kczwjj", "课程中文简介"),
-    ("kcywjj", "课程英文简介"),
-    ("ybzsyq", "预备知识要求"),
-    ("jcjydcl", "教材及阅读材料"),
-)
+def _field_pairs(name: str) -> tuple[tuple[str, str], ...]:
+    rows = _template_config().get(name, [])
+    if not isinstance(rows, list):
+        return ()
+    result = []
+    for row in rows:
+        if isinstance(row, (list, tuple)) and len(row) >= 2:
+            result.append((str(row[0]), str(row[1])))
+    return tuple(result)
 
-COURSE_GOAL_FIELDS = (
-    ("szmb", "思政目标"),
-    ("nlmb", "能力目标"),
-    ("zsmb", "知识目标"),
-)
 
-JXNR_ROW_FIELDS = (
-    ("xh", "序号"),
-    ("zt", "主题"),
-    ("zsd", "知识点"),
-    ("xs", "学时"),
-)
-
-JXAP_ROW_FIELDS = (
-    ("zs", "序号"),
-    ("sknr", "授课内容"),
-    ("skfs", "授课方式"),
-    ("szyqjxx", "思政元素的融入和预期教学成效"),
-)
-
+NORMAL_BASIC_FIELDS = _field_pairs("normal_basic_fields")
+SPECIAL_BASIC_FIELDS = _field_pairs("special_basic_fields")
+TOP_LEVEL_FIELDS = _field_pairs("top_level_fields")
+COURSE_GOAL_FIELDS = _field_pairs("course_goal_fields")
+JXNR_ROW_FIELDS = _field_pairs("jxnr_row_fields")
+JXAP_ROW_FIELDS = _field_pairs("jxap_row_fields")
 SECTION_HINTS = {
-    "jcxx": ("课程基本信息", "基本信息", "课程信息"),
-    "kczwjj": ("课程中文简介",),
-    "kcywjj": ("课程英文简介",),
-    "ybzsyq": ("预备知识要求", "预备知识"),
-    "jcjydcl": ("教材及阅读材料", "教材", "阅读材料"),
-    "kcmb": ("课程目标", "教学目标"),
-    "jxnr": ("教学内容", "课程内容"),
-    "jxap": ("教学安排", "课程安排", "授课安排", "教学进度"),
-    "kcyq": ("课程要求",),
+    str(key): tuple(str(item) for item in value)
+    for key, value in (_template_config().get("section_hints", {}) or {}).items()
+    if isinstance(value, list)
 }
-
 
 def audit_xxyzwzfhmb(subject: AuditSubject) -> tuple[SectionFinding, list[FieldFinding]]:
     payload = subject.payload or {}
@@ -110,7 +72,7 @@ def audit_xxyzwzfhmb(subject: AuditSubject) -> tuple[SectionFinding, list[FieldF
         },
         ZYWJJ: {
             "result": "否" if intro_failures else "是",
-            "reason": "；".join(_dedupe([item.reason for item in intro_failures])),
+            "reason": "；".join(_dedupe([item.reason for item in intro_failures])), 
             "fail_count": len(intro_failures),
         },
     }
@@ -520,7 +482,7 @@ def _find_meta_table(
             found_labels = [label for label in labels if label in text]
             if len(found_labels) < max(2, min(len(labels), 3)):
                 continue
-            has_row = bool(re.search(r"\d+\s*[、,，.\s]", text)) or any(keyword in text for keyword in ("第1", "第一", "主题", "授课"))
+            has_row = bool(re.search(r"\d+\s*[、.．\s]", text)) or any(keyword in text for keyword in ("第", "第一", "主题", "授课"))
             if require_rows and not has_row:
                 continue
             return {
@@ -597,7 +559,7 @@ def _section_snippets(text: str, hints: tuple[str, ...], *, window: int = 800) -
 
 
 def _label_value(snippet: str, label: str) -> str | None:
-    pattern = rf"{re.escape(label)}\s*[:：]?\s*([^\n\r；;。]*)"
+    pattern = rf"{re.escape(label)}\s*[:：]?\s*([^\n\r；。]*)"
     match = re.search(pattern, snippet)
     if not match:
         return None
@@ -645,3 +607,5 @@ def _json_value(value: Any) -> Any:
 
 def _exact_value(value: Any) -> str:
     return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(value or "")).strip()
+
+

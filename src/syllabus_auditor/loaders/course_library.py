@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import math
 import re
@@ -7,14 +7,16 @@ from typing import Any
 
 import pandas as pd
 
+from config import load_project_config
 from syllabus_auditor.core.db.connection import get_project_root
 from syllabus_auditor.core.db.courses import CourseStore
 from syllabus_auditor.core.field_mapping import EXCEL_TO_DB_COLUMN
 from syllabus_auditor.core.meta_builder import relative_source_path
 from syllabus_auditor.core.types import CourseLibrarySummary
 
-EXCEL_SUFFIXES = {".xls", ".xlsx", ".xlsm", ".xlsb"}
-DEFAULT_LIBRARY_FILENAME = "培养-课程库信息0616.xls"
+LOADER_CONFIG = load_project_config().get("loader", {})
+EXCEL_SUFFIXES = set(LOADER_CONFIG.get("excel_suffixes", []))
+DEFAULT_LIBRARY_FILENAME = str(LOADER_CONFIG.get("default_course_library_filename") or "")
 
 
 def _normalize_column_name(name: str) -> str:
@@ -79,11 +81,7 @@ def read_course_library_excel(excel_path: Path) -> list[dict[str, str | None]]:
     return rows
 
 
-def find_course_library_excel(
-    data_dir: Path,
-    *,
-    explicit: Path | None = None,
-) -> Path:
+def find_course_library_excel(data_dir: Path, *, explicit: Path | None = None) -> Path:
     if explicit is not None:
         if not explicit.is_file():
             raise FileNotFoundError(f"课程库 Excel 不存在: {explicit}")
@@ -95,25 +93,16 @@ def find_course_library_excel(
     if default_path.is_file():
         return default_path
 
-    candidates = sorted(
-        path
-        for path in data_dir.iterdir()
-        if path.is_file() and path.suffix.lower() in EXCEL_SUFFIXES
-    )
+    candidates = sorted(path for path in data_dir.iterdir() if path.is_file() and path.suffix.lower() in EXCEL_SUFFIXES)
     if len(candidates) == 1:
         return candidates[0]
     if not candidates:
-        raise FileNotFoundError(f"在 {data_dir} 下未找到课程库 Excel（.xls/.xlsx）")
+        raise FileNotFoundError(f"在 {data_dir} 下未找到课程库 Excel（xls/xlsx）")
     names = ", ".join(path.name for path in candidates)
     raise FileNotFoundError(f"data/ 下有多个 Excel，请用 --input 指定课程库文件: {names}")
 
 
-def prepare_course_library(
-    excel_path: Path,
-    *,
-    import_term: str | None = None,
-    store: CourseStore | None = None,
-) -> CourseLibrarySummary:
+def prepare_course_library(excel_path: Path, *, import_term: str | None = None, store: CourseStore | None = None) -> CourseLibrarySummary:
     project_root = get_project_root()
     store = store or CourseStore()
     source_file = relative_source_path(excel_path.resolve(), project_root)
@@ -134,11 +123,7 @@ def prepare_course_library(
         seen_kcbh.add(kcbh)
         db_rows.append({**row, "import_term": import_term, "source_file": source_file})
 
-    summary.imported = store.upsert_many(
-        db_rows,
-        import_term=import_term,
-        source_file=source_file,
-    )
+    summary.imported = store.upsert_many(db_rows, import_term=import_term, source_file=source_file)
     return summary
 
 
@@ -162,8 +147,6 @@ def run_prepare_course_library(
         return None
 
     summary = prepare_course_library(excel_path, import_term=import_term)
-    print(
-        f"完成：读取 {summary.total} 行，"
-        f"导入 {summary.imported} 门课，跳过 {summary.skipped} 行"
-    )
+    print(f"完成：读取 {summary.total} 行，导入 {summary.imported} 门课，跳过 {summary.skipped} 行")
     return summary
+

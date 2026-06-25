@@ -203,7 +203,7 @@ SELECT ar.subject_key, ar.kcbh, ar.source_path,
 FROM audit_results ar
 JOIN audit_findings af ON af.result_id = ar.id
 WHERE ar.run_id = 1
-  AND af.wd = 'xxyzwzfhmb';
+  AND af.wd = '信息要素完整、符合模板、是否有中英文简介';
 ```
 
 查询某套课程字段级不通过原因：
@@ -223,7 +223,7 @@ ORDER BY section, field;
 SELECT wd, llm_trace
 FROM audit_findings
 WHERE run_id = 1
-  AND wd IN ('jxmbnrfsfhyq', 'szysfyxrghj');
+  AND wd IN ('教学目标、内容、方式是否符合要求', '是否将思政元素有效融入各环节');
 ```
 
 ## 审核指标

@@ -19,6 +19,7 @@ class ExtractionRaw:
     course_requirements: list[dict[str, Any]] = field(default_factory=list)
     course_goal_extras: dict[str, str] = field(default_factory=dict)
     extraction_warnings: list[dict[str, Any]] = field(default_factory=list)
+    section_extraction: dict[str, Any] = field(default_factory=dict)
     source_path: Path | None = None
 
 

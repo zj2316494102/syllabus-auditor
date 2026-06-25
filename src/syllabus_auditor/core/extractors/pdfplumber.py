@@ -1,57 +1,33 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
 import pdfplumber
 
+from config import load_extraction_config, load_project_config
+from syllabus_auditor.core.extractors.base import BaseExtractor
+from syllabus_auditor.core.extractors.enhancer import enhance_raw_extraction
+from syllabus_auditor.core.extractors.section_table_parser import parse_course_goal_extras, parse_section_tables
 from syllabus_auditor.core.meta_builder import EXTRACTOR_VERSION
 from syllabus_auditor.core.types import ExtractionRaw
-from syllabus_auditor.core.extractors.base import BaseExtractor
-from syllabus_auditor.core.extractors.section_table_parser import (
-    parse_course_goal_extras,
-    parse_section_tables,
-)
 
-RAW_CN_FIELDS = [
-    "课程编号",
-    "开课（院）系",
-    "中文课程名称",
-    "英文课程名称",
-    "课程性质",
-    "课程类别",
-    "课程模块",
-    "授课语言",
-    "是否允许外学院选课",
-    "考核方式",
-    "周学时",
-    "上课周数",
-    "总学时",
-    "教学学时",
-    "实验学时",
-    "实践学时",
-    "其他学时",
-    "自学学时",
-    "课程学分",
-    "任课教师姓名",
-    "教师工号",
-    "职称",
-    "学历",
-    "E-mail",
-    "联系电话",
-    "课程中文简介",
-    "课程英文简介",
-    "思政目标",
-    "能力目标",
-    "知识目标",
-    "课程目标概述",
-    "教学内容概述",
-    "课程安排概述",
-    "预备知识要求",
-    "课程要求",
-    "阅读材料",
-    "考核方式说明",
-]
+
+def _pdf_config() -> dict[str, Any]:
+    value = load_project_config().get("pdf_extractor", {})
+    return value if isinstance(value, dict) else {}
+
+
+def _section_titles(key: str) -> list[str]:
+    value = load_extraction_config().get("section_titles", {}).get(key, [])
+    return [str(item) for item in value] if isinstance(value, list) else []
+
+
+RAW_CN_FIELDS = [str(item) for item in (_pdf_config().get("raw_cn_fields") or [])]
+BASIC_PAIR_LABELS = {str(item) for item in (_pdf_config().get("basic_pair_labels") or [])}
+TEACHER_LABELS = [str(item) for item in (_pdf_config().get("teacher_labels") or [])]
+TWO_COLUMN_SECTION_LABELS = {str(item) for item in (_pdf_config().get("two_column_section_labels") or [])}
 
 
 def normalize_label(value: str | None) -> str:
@@ -66,12 +42,6 @@ def clean_text(value: str | None, keep_newline: bool = False) -> str:
     text = re.sub(r" *\n *", "\n" if keep_newline else "", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
-
-
-def cell(row: list[str | None], index: int) -> str:
-    if index >= len(row):
-        return ""
-    return clean_text(row[index])
 
 
 def table_has_labels(table: list[list[str | None]], labels: list[str]) -> bool:
@@ -96,26 +66,6 @@ def join_text(existing: str, addition: str) -> str:
 
 
 def parse_pair_table(data: dict[str, str], table: list[list[str | None]]) -> None:
-    direct_keys = {
-        "课程编号",
-        "开课（院）系",
-        "中文课程名称",
-        "英文课程名称",
-        "课程性质",
-        "课程类别",
-        "课程模块",
-        "授课语言",
-        "考核方式",
-        "周学时",
-        "上课周数",
-        "总学时",
-        "教学学时",
-        "实验学时",
-        "实践学时",
-        "其他学时",
-        "自学学时",
-        "课程学分",
-    }
     for row in table:
         values = [clean_text(c) for c in row]
         for idx in range(0, len(values), 2):
@@ -123,7 +73,7 @@ def parse_pair_table(data: dict[str, str], table: list[list[str | None]]) -> Non
             value = values[idx + 1] if idx + 1 < len(values) else ""
             if not key:
                 continue
-            if key in direct_keys:
+            if key in BASIC_PAIR_LABELS:
                 put_if_present(data, key, value)
             elif key in ("是否允许外学院选课", "允许外学院选课"):
                 put_if_present(data, "是否允许外学院选课", value)
@@ -137,18 +87,8 @@ def parse_teacher(data: dict[str, str], table: list[list[str | None]]) -> None:
         for idx in range(0, len(values), 2):
             key = normalize_label(values[idx])
             value = values[idx + 1] if idx + 1 < len(values) else ""
-            if key == "任课教师姓名":
-                put_if_present(data, "任课教师姓名", value)
-            elif key == "教师工号":
-                put_if_present(data, "教师工号", value)
-            elif key == "职称":
-                put_if_present(data, "职称", value)
-            elif key == "学历":
-                put_if_present(data, "学历", value)
-            elif key.lower() == "e-mail":
-                put_if_present(data, "E-mail", value)
-            elif key == "联系电话":
-                data["联系电话"] = value
+            if key in TEACHER_LABELS:
+                data[key] = value
     if not data.get("任课教师姓名"):
         for row in table:
             for idx, value in enumerate(row):
@@ -158,14 +98,6 @@ def parse_teacher(data: dict[str, str], table: list[list[str | None]]) -> None:
 
 
 def parse_two_column_sections(data: dict[str, str], tables: list[list[list[str | None]]]) -> None:
-    target_labels = {
-        "课程中文简介",
-        "课程英文简介",
-        "思政目标",
-        "能力目标",
-        "知识目标",
-        "预备知识要求",
-    }
     current_label: str | None = None
     for table in tables:
         max_cols = max((len(row) for row in table), default=0)
@@ -174,7 +106,7 @@ def parse_two_column_sections(data: dict[str, str], tables: list[list[list[str |
             continue
         for row in table:
             values = [clean_text(c, keep_newline=True) for c in row]
-            label_idx = next((idx for idx, value in enumerate(values) if normalize_label(value) in target_labels), -1)
+            label_idx = next((idx for idx, value in enumerate(values) if normalize_label(value) in TWO_COLUMN_SECTION_LABELS), -1)
             if label_idx >= 0:
                 label = normalize_label(values[label_idx])
                 value = clean_text("\n".join(values[label_idx + 1 :]), keep_newline=True)
@@ -193,23 +125,20 @@ def normalize_full_text(text: str) -> str:
     return "\n".join(line for line in lines if line)
 
 
-def extract_section(
-    text: str,
-    title: str,
-    next_titles: list[str],
-    *,
-    prefer_last: bool = False,
-) -> str:
-    title_pattern = rf"(?m)^\s*(?:[（(][一二三四五六七八九十]+[）)]\s*)?{re.escape(title)}\s*$"
-    matches = list(re.finditer(title_pattern, text))
+def _title_pattern(title: str) -> str:
+    prefix = r"(?:[（(]?[一二三四五六七八九十0-9]+[）)]?\s*)?"
+    return rf"(?m)^\s*{prefix}{re.escape(title)}\s*$"
+
+
+def extract_section(text: str, title: str, next_titles: list[str], *, prefer_last: bool = False) -> str:
+    matches = list(re.finditer(_title_pattern(title), text))
     if not matches:
         return ""
     match = matches[-1] if prefer_last else matches[0]
     start = match.end()
     end = len(text)
     for next_title in next_titles:
-        next_pattern = rf"(?m)^\s*(?:[（(][一二三四五六七八九十]+[）)]\s*)?{re.escape(next_title)}\s*$"
-        next_match = re.search(next_pattern, text[start:])
+        next_match = re.search(_title_pattern(next_title), text[start:])
         if next_match:
             end = min(end, start + next_match.start())
     return clean_text(text[start:end], keep_newline=True)
@@ -217,51 +146,27 @@ def extract_section(
 
 def parse_sections_from_text(data: dict[str, str], full_text: str) -> None:
     text = normalize_full_text(full_text)
+    stop_after_intro = _section_titles("course_goal") + _section_titles("teaching_content") + _section_titles("course_schedule") + _section_titles("reading_material") + _section_titles("assessment") + _section_titles("course_requirements")
 
     if not data.get("预备知识要求"):
-        data["预备知识要求"] = extract_section(
-            text,
-            "预备知识要求",
-            ["课程目标", "教学内容", "教学安排", "阅读材料", "考核方式", "课程要求"],
-        )
+        data["预备知识要求"] = extract_section(text, "预备知识要求", stop_after_intro)
 
     if not any(data.get(k) for k in ("思政目标", "能力目标", "知识目标")):
-        overview = extract_section(
-            text,
-            "课程目标",
-            ["教学内容", "教学安排", "阅读材料", "考核方式", "课程要求"],
-        )
+        overview = extract_section(text, "课程目标", _section_titles("teaching_content") + _section_titles("course_schedule") + _section_titles("reading_material") + _section_titles("assessment") + _section_titles("course_requirements"))
         if overview:
             data["课程目标概述"] = overview
 
-    data["课程要求"] = extract_section(
-        text,
-        "课程要求",
-        ["教学内容", "教学安排", "阅读材料", "考核方式"],
-    )
-    data["阅读材料"] = extract_section(text, "阅读材料", ["课程要求", "考核方式"])
-    data["考核方式说明"] = extract_section(text, "考核方式", ["课程要求", "阅读材料"], prefer_last=True)
+    data["课程要求"] = extract_section(text, "课程要求", _section_titles("teaching_content") + _section_titles("course_schedule") + _section_titles("reading_material") + _section_titles("assessment"))
+    data["阅读材料"] = extract_section(text, "阅读材料", _section_titles("course_requirements") + _section_titles("assessment"))
+    data["考核方式说明"] = extract_section(text, "考核方式", _section_titles("course_requirements") + _section_titles("reading_material"), prefer_last=True)
 
 
-def fill_overview_fallbacks(
-    data: dict[str, str],
-    full_text: str,
-    teaching_content: list[dict[str, str]],
-    course_schedule: list[dict[str, str]],
-) -> None:
+def fill_overview_fallbacks(data: dict[str, str], full_text: str, teaching_content: list[dict[str, str]], course_schedule: list[dict[str, str]]) -> None:
     text = normalize_full_text(full_text)
     if not teaching_content and not data.get("教学内容概述"):
-        data["教学内容概述"] = extract_section(
-            text,
-            "教学内容",
-            ["教学安排", "阅读材料", "考核方式", "课程要求"],
-        )
+        data["教学内容概述"] = extract_section(text, "教学内容", _section_titles("course_schedule") + _section_titles("reading_material") + _section_titles("assessment") + _section_titles("course_requirements"))
     if not course_schedule and not data.get("课程安排概述"):
-        data["课程安排概述"] = extract_section(
-            text,
-            "教学安排",
-            ["阅读材料", "考核方式", "课程要求"],
-        )
+        data["课程安排概述"] = extract_section(text, "教学安排", _section_titles("reading_material") + _section_titles("assessment") + _section_titles("course_requirements"))
 
 
 class PdfPlumberExtractor(BaseExtractor):
@@ -302,7 +207,7 @@ class PdfPlumberExtractor(BaseExtractor):
         parse_sections_from_text(data, full_text)
         fill_overview_fallbacks(data, full_text, teaching_content, course_schedule)
 
-        return ExtractionRaw(
+        raw = ExtractionRaw(
             cn_data=data,
             full_text=full_text,
             raw_pages=raw_pages,
@@ -315,6 +220,7 @@ class PdfPlumberExtractor(BaseExtractor):
             extraction_warnings=extraction_warnings,
             source_path=pdf_path,
         )
+        return enhance_raw_extraction(raw, pdf_path)
 
 
 EXTRACTOR_NAME = EXTRACTOR_VERSION

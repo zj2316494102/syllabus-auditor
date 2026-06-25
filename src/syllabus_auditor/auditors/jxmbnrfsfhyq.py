@@ -10,14 +10,16 @@ from syllabus_auditor.core.llm import build_llm_trace, merge_llm_traces
 
 
 DIMENSION = "jxmbnrfsfhyq"
-DIMENSION_LABEL = "教学目标、内容、方式是否符合要求"
+DIMENSION_LABEL = "\u6559\u5b66\u76ee\u6807\u3001\u5185\u5bb9\u3001\u65b9\u5f0f\u662f\u5426\u7b26\u5408\u8981\u6c42"
+YES = "\u662f"
+NO = "\u5426"
 ITEMS = (
-    ("jxmb", "教学目标是否符合要求"),
-    ("jxnr", "教学内容是否符合要求"),
-    ("jxfs", "教学方式是否符合要求"),
+    ("jxmb", "\u6559\u5b66\u76ee\u6807\u662f\u5426\u7b26\u5408\u8981\u6c42"),
+    ("jxnr", "\u6559\u5b66\u5185\u5bb9\u662f\u5426\u7b26\u5408\u8981\u6c42"),
+    ("jxfs", "\u6559\u5b66\u65b9\u5f0f\u662f\u5426\u7b26\u5408\u8981\u6c42"),
 )
-FALLBACK_REASON = "模型未给出不通过原因，需人工复核"
-NO_LLM_REASON = "未配置 LLM，无法审核教学目标、内容、方式是否符合要求，需人工复核"
+FALLBACK_REASON = "\u6a21\u578b\u672a\u7ed9\u51fa\u4e0d\u901a\u8fc7\u539f\u56e0\uff0c\u9700\u4eba\u5de5\u590d\u6838"
+NO_LLM_REASON = "\u672a\u914d\u7f6e LLM\uff0c\u65e0\u6cd5\u5ba1\u6838\u6559\u5b66\u76ee\u6807\u3001\u5185\u5bb9\u3001\u65b9\u5f0f\u662f\u5426\u7b26\u5408\u8981\u6c42\uff0c\u9700\u4eba\u5de5\u590d\u6838"
 
 
 class JsonLlmClient(Protocol):
@@ -191,41 +193,23 @@ def normalize_llm_result(result: dict[str, Any]) -> dict[str, Any]:
         raw = item_by_key.get(key, {})
         item_result = _result_value(raw.get("result"))
         reasons = _string_list(raw.get("reasons"))
-        if item_result == "否" and not reasons:
+        if item_result == NO and not reasons:
             reasons = [FALLBACK_REASON]
-        normalized["items"].append(
-            {
-                "key": key,
-                "label": str(raw.get("label") or label),
-                "result": item_result,
-                "reasons": reasons,
-                "evidence_paths": _string_list(raw.get("evidence_paths")),
-                "suggestion": str(raw.get("suggestion") or ""),
-                "llm_trace": _as_dict(raw.get("llm_trace")),
-            }
-        )
+        normalized["items"].append({"key": key, "label": str(raw.get("label") or label), "result": item_result, "reasons": reasons, "evidence_paths": _string_list(raw.get("evidence_paths")), "suggestion": str(raw.get("suggestion") or ""), "llm_trace": _as_dict(raw.get("llm_trace"))})
 
-    if any(item["result"] == "否" for item in normalized["items"]):
-        normalized["result"] = "否"
-    if normalized["result"] == "否" and not normalized["reasons"]:
-        normalized["reasons"] = _collect_item_reasons(normalized["items"]) or [FALLBACK_REASON]
+    if any(item["result"] == NO for item in normalized["items"]):
+        normalized["result"] = NO
+    if normalized["result"] == NO:
+        normalized["reasons"] = _merge_reasons(normalized["reasons"], _collect_item_reasons(normalized["items"])) or [FALLBACK_REASON]
     return normalized
 
 
 def normalize_item_result(result: dict[str, Any], key: str, label: str) -> dict[str, Any]:
     item_result = _result_value(result.get("result"))
     reasons = _string_list(result.get("reasons"))
-    if item_result == "否" and not reasons:
-        reasons = [f"模型未给出{label}不通过原因，需人工复核"]
-    return {
-        "key": key,
-        "label": str(result.get("label") or label),
-        "result": item_result,
-        "reasons": reasons,
-        "evidence_paths": _string_list(result.get("evidence_paths")),
-        "suggestion": str(result.get("suggestion") or ""),
-        "llm_trace": _as_dict(result.get("llm_trace")),
-    }
+    if item_result == NO and not reasons:
+        reasons = [f"\u6a21\u578b\u672a\u7ed9\u51fa{label}\u4e0d\u901a\u8fc7\u539f\u56e0\uff0c\u9700\u4eba\u5de5\u590d\u6838"]
+    return {"key": key, "label": str(result.get("label") or label), "result": item_result, "reasons": reasons, "evidence_paths": _string_list(result.get("evidence_paths")), "suggestion": str(result.get("suggestion") or ""), "llm_trace": _as_dict(result.get("llm_trace"))}
 
 
 def aggregate_item_results(items: list[dict[str, Any]]) -> dict[str, Any]:
@@ -233,77 +217,33 @@ def aggregate_item_results(items: list[dict[str, Any]]) -> dict[str, Any]:
     item_by_key = {str(item.get("key")): item for item in items if isinstance(item, dict)}
     for key, label in ITEMS:
         normalized_items.append(normalize_item_result(item_by_key.get(key, {}), key, label))
-    result = "否" if any(item["result"] == "否" for item in normalized_items) else "是"
-    reasons = _collect_item_reasons(normalized_items) if result == "否" else []
-    return {
-        "dimension": DIMENSION,
-        "label": DIMENSION_LABEL,
-        "result": result,
-        "reasons": reasons or ([FALLBACK_REASON] if result == "否" else []),
-        "items": normalized_items,
-    }
+    result = NO if any(item["result"] == NO for item in normalized_items) else YES
+    reasons = _collect_item_reasons(normalized_items) if result == NO else []
+    return {"dimension": DIMENSION, "label": DIMENSION_LABEL, "result": result, "reasons": reasons or ([FALLBACK_REASON] if result == NO else []), "items": normalized_items}
 
 
 def build_findings(result: dict[str, Any], audit_input: dict[str, Any]) -> tuple[SectionFinding, list[FieldFinding]]:
     result = normalize_llm_result(result)
-    is_pass = result["result"] == "是"
+    is_pass = result["result"] == YES
     status = PASS if is_pass else FAIL
     reasons = _string_list(result.get("reasons"))
     evidence = {
-        "items": [
-            {
-                "key": item["key"],
-                "result": item["result"],
-                "evidence_paths": item["evidence_paths"],
-                "reasons": item["reasons"],
-            }
-            for item in result["items"]
-        ],
+        "items": [{"key": item["key"], "result": item["result"], "evidence_paths": item["evidence_paths"], "reasons": item["reasons"]} for item in result["items"]],
         "meta_context_used": bool((audit_input.get("meta_context") or {}).get("raw_text_segments")),
     }
-    llm_trace = merge_llm_traces(
-        [_as_dict(item.get("llm_trace")) for item in result["items"]],
-        dimension=DIMENSION,
-        mode="direct_llm",
-    )
-    section = SectionFinding(
-        wd=DIMENSION,
-        status=status,
-        message=result["result"],
-        evidence=evidence,
-        suggestion="查看 details.items 中各子项建议。" if not is_pass else "",
-        details={
-            "label": DIMENSION_LABEL,
-            "result": result["result"],
-            "reasons": reasons,
-            "items": result["items"],
-        },
-        pdfs="direct_llm",
-        llm_trace=llm_trace,
-    )
+    llm_trace = merge_llm_traces([_as_dict(item.get("llm_trace")) for item in result["items"]], dimension=DIMENSION, mode="direct_llm")
+    section = SectionFinding(wd=DIMENSION, status=status, message=result["result"], evidence=evidence, suggestion="\u67e5\u770b details.items \u4e2d\u5404\u5b50\u9879\u5efa\u8bae\u3002" if not is_pass else "", details={"label": DIMENSION_LABEL, "result": result["result"], "reasons": reasons, "items": result["items"]}, pdfs="direct_llm", llm_trace=llm_trace)
     fields = [_item_to_field_finding(item) for item in result["items"]]
     return section, fields
 
 
 def _item_to_field_finding(item: dict[str, Any]) -> FieldFinding:
-    is_pass = item["result"] == "是"
+    is_pass = item["result"] == YES
     reasons = _string_list(item.get("reasons"))
-    reason = "；".join(reasons)
+    reason = "\uff1b".join(reasons)
     if not is_pass and not reason:
         reason = FALLBACK_REASON
-    return FieldFinding(
-        section=DIMENSION,
-        field=item["key"],
-        path=f"llm.{DIMENSION}.{item['key']}",
-        status=PASS if is_pass else FAIL,
-        reason="" if is_pass else reason,
-        message=item["result"] if is_pass else reason,
-        expected={"requirement": item["label"]},
-        actual={"result": item["result"]},
-        evidence={"evidence_paths": item.get("evidence_paths") or []},
-        suggestion=item.get("suggestion") or "",
-        llm_trace=_as_dict(item.get("llm_trace")),
-    )
+    return FieldFinding(section=DIMENSION, field=item["key"], path=f"llm.{DIMENSION}.{item['key']}", status=PASS if is_pass else FAIL, reason="" if is_pass else reason, message=item["result"] if is_pass else reason, expected={"requirement": item["label"]}, actual={"result": item["result"]}, evidence={"evidence_paths": item.get("evidence_paths") or []}, suggestion=item.get("suggestion") or "", llm_trace=_as_dict(item.get("llm_trace")))
 
 
 def _manual_review_result(
@@ -315,23 +255,9 @@ def _manual_review_result(
     return {
         "dimension": DIMENSION,
         "label": DIMENSION_LABEL,
-        "result": "否",
+        "result": NO,
         "reasons": [reason],
-        "items": [
-            _manual_item_result(
-                key,
-                label,
-                reason,
-                llm_trace=build_llm_trace(
-                    llm_client=llm_client,
-                    dimension=DIMENSION,
-                    item=key,
-                    prompt=build_item_prompt(audit_input, key) if audit_input else "",
-                    status="no_llm",
-                ),
-            )
-            for key, label in ITEMS
-        ],
+        "items": [_manual_item_result(key, label, reason, llm_trace=build_llm_trace(llm_client=llm_client, dimension=DIMENSION, item=key, prompt=build_item_prompt(audit_input, key) if audit_input else "", status="no_llm")) for key, label in ITEMS],
     }
 
 
@@ -342,19 +268,14 @@ def _manual_item_result(
     *,
     llm_trace: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
-        "key": key,
-        "label": label,
-        "result": "否",
-        "reasons": [reason],
-        "evidence_paths": [],
-        "suggestion": "配置 LLM 后重新审核，或进行人工复核。",
-        "llm_trace": llm_trace or {},
-    }
+    return {"key": key, "label": label, "result": NO, "reasons": [reason], "evidence_paths": [], "suggestion": "\u914d\u7f6e LLM \u540e\u91cd\u65b0\u5ba1\u6838\uff0c\u6216\u8fdb\u884c\u4eba\u5de5\u590d\u6838\u3002", "llm_trace": llm_trace or {}}
 
 
 def _result_value(value: Any) -> str:
-    return "是" if str(value).strip() == "是" else "否"
+    text = str(value or "").strip().lower()
+    if text in {YES, "yes", "pass", "passed", "true", "1"} or text.startswith("\u93c4"):
+        return YES
+    return NO
 
 
 def _string_list(value: Any) -> list[str]:
@@ -368,9 +289,21 @@ def _string_list(value: Any) -> list[str]:
 def _collect_item_reasons(items: list[dict[str, Any]]) -> list[str]:
     reasons: list[str] = []
     for item in items:
-        if item.get("result") == "否":
+        if item.get("result") == NO:
             reasons.extend(_string_list(item.get("reasons")))
-    return reasons
+    return _merge_reasons(reasons)
+
+
+def _merge_reasons(*groups: list[str]) -> list[str]:
+    seen: set[str] = set()
+    merged: list[str] = []
+    for group in groups:
+        for reason in group:
+            text = str(reason or "").strip()
+            if text and text not in seen:
+                seen.add(text)
+                merged.append(text)
+    return merged
 
 
 def _as_dict(value: Any) -> dict[str, Any]:

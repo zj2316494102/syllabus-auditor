@@ -7,6 +7,8 @@ from datetime import datetime
 from pathlib import PurePath
 from typing import Any
 
+from syllabus_auditor.core.audit_labels import audit_wd_label
+
 
 PASS = "pass"
 FAIL = "fail"
@@ -15,11 +17,13 @@ ERROR = "error"
 SKIPPED = "skipped"
 
 KCJBXX_WD = "kcjbxxsfykckyz"
-KCJBXX_LABEL = "课程基本信息是否与课程库一致"
+KCJBXX_LABEL = "\u8bfe\u7a0b\u57fa\u672c\u4fe1\u606f\u662f\u5426\u4e0e\u8bfe\u7a0b\u5e93\u4e00\u81f4"
 JXNRXS_WD = "jxnrsfyxspp"
 JXAPZC_WD = "jxapsfyzcpp"
-JXAPZC_LABEL = "教学安排是否与周次匹配"
-JXNRXS_LABEL = "教学内容是否与学时匹配"
+JXAPZC_LABEL = "\u6559\u5b66\u5b89\u6392\u662f\u5426\u4e0e\u5468\u6b21\u5339\u914d"
+JXNRXS_LABEL = "\u6559\u5b66\u5185\u5bb9\u662f\u5426\u4e0e\u5b66\u65f6\u5339\u914d"
+YES = "\u662f"
+NO = "\u5426"
 NON_PASS_STATUSES = {FAIL, WARNING, ERROR, "manual_review"}
 
 
@@ -121,58 +125,58 @@ def refresh_subject_audit(audit: SubjectAudit) -> SubjectAudit:
 
 
 BASIC_COMPARISON_FIELDS = (
-    ("kcbh", "kcbh", "课程编号"),
-    ("kkyx", "kkyx", "开课（院）系"),
-    ("zwkcmc", "zwkcmc", "中文课程名称"),
-    ("ywkcmc", "ywkcmc", "英文课程名称"),
-    ("skyy", "skyy", "授课语言"),
-    ("sfyxwxyxk", "yxwxyxk", "是否允许外学院选课"),
-    ("khfs", "khfs", "考核方式"),
-    ("kcxz", "kcxz", "课程性质"),
-    ("kclb", "kclb", "课程类别"),
-    ("zxs", "zxs", "周学时"),
-    ("skzs", "skzs", "上课周数"),
-    ("zongxs", "zongxs", "总学时"),
-    ("jxxs", "jxxs", "教学学时"),
-    ("kcxf", "kcxf", "课程学分"),
-    ("rkjsxm", "zjjsxm", "任课教师姓名"),
+    ("kcbh", "kcbh", "\u8bfe\u7a0b\u7f16\u53f7"),
+    ("kkyx", "kkyx", "\u5f00\u8bfe\uff08\u9662\uff09\u7cfb"),
+    ("zwkcmc", "zwkcmc", "\u4e2d\u6587\u8bfe\u7a0b\u540d\u79f0"),
+    ("ywkcmc", "ywkcmc", "\u82f1\u6587\u8bfe\u7a0b\u540d\u79f0"),
+    ("skyy", "skyy", "\u6388\u8bfe\u8bed\u8a00"),
+    ("sfyxwxyxk", "yxwxyxk", "\u662f\u5426\u5141\u8bb8\u5916\u5b66\u9662\u9009\u8bfe"),
+    ("khfs", "khfs", "\u8003\u6838\u65b9\u5f0f"),
+    ("kcxz", "kcxz", "\u8bfe\u7a0b\u6027\u8d28"),
+    ("kclb", "kclb", "\u8bfe\u7a0b\u7c7b\u522b"),
+    ("zxs", "zxs", "\u5468\u5b66\u65f6"),
+    ("skzs", "skzs", "\u4e0a\u8bfe\u5468\u6570"),
+    ("zongxs", "zongxs", "\u603b\u5b66\u65f6"),
+    ("jxxs", "jxxs", "\u6559\u5b66\u5b66\u65f6"),
+    ("kcxf", "kcxf", "\u8bfe\u7a0b\u5b66\u5206"),
+    ("rkjsxm", "zjjsxm", "\u4efb\u8bfe\u6559\u5e08\u59d3\u540d"),
 )
 
 INDEPENDENT_REQUIRED_JCXX_FIELDS = (
-    ("jsgh", "教师工号"),
+    ("jsgh", "\u6559\u5e08\u5de5\u53f7"),
     ("email", "E-mail"),
-    ("lxdh", "联系电话"),
+    ("lxdh", "\u8054\u7cfb\u7535\u8bdd"),
 )
 
 TOP_LEVEL_REQUIRED = {
-    "kczwjj": "课程中文简介",
-    "kcywjj": "课程英文简介",
-    "ybzsyq": "预备知识要求",
-    "jcjydcl": "教材及阅读材料",
+    "kczwjj": "\u8bfe\u7a0b\u4e2d\u6587\u7b80\u4ecb",
+    "kcywjj": "\u8bfe\u7a0b\u82f1\u6587\u7b80\u4ecb",
+    "ybzsyq": "\u9884\u5907\u77e5\u8bc6\u8981\u6c42",
+    "jcjydcl": "\u6559\u6750\u53ca\u9605\u8bfb\u6750\u6599",
 }
 
 SECTION_REQUIRED = {
-    "kcmb": {"szmb": "思政目标", "nlmb": "能力目标", "zsmb": "知识目标"},
-    "jxnr": {"tm": "教学内容条目"},
-    "jxap": {"tm": "教学安排条目"},
-    "khfsb": {"tm": "考核方式条目"},
+    "kcmb": {"szmb": "\u601d\u653f\u76ee\u6807", "nlmb": "\u80fd\u529b\u76ee\u6807", "zsmb": "\u77e5\u8bc6\u76ee\u6807"},
+    "jxnr": {"tm": "\u6559\u5b66\u5185\u5bb9\u6761\u76ee"},
+    "jxap": {"tm": "\u6559\u5b66\u5b89\u6392\u6761\u76ee"},
+    "khfsb": {"tm": "\u8003\u6838\u65b9\u5f0f\u6761\u76ee"},
 }
 
 ROW_REQUIRED = {
-    "jxnr": {"xh": "序号", "zt": "主题", "zsd": "知识点", "xs": "学时"},
-    "jxap": {"zs": "周次/序号", "sknr": "授课内容", "skfs": "授课方式", "szyqjxx": "思政元素融入"},
-    "khfsb": {"ksxs": "考试形式", "kcnr": "考察内容", "kcfs": "考察方式", "zb": "占比"},
+    "jxnr": {"xh": "\u5e8f\u53f7", "zt": "\u4e3b\u9898", "zsd": "\u77e5\u8bc6\u70b9", "xs": "\u5b66\u65f6"},
+    "jxap": {"zs": "\u5468\u6b21/\u5e8f\u53f7", "sknr": "\u6388\u8bfe\u5185\u5bb9", "skfs": "\u6388\u8bfe\u65b9\u5f0f", "szyqjxx": "\u601d\u653f\u5143\u7d20\u878d\u5165"},
+    "khfsb": {"ksxs": "\u8003\u8bd5\u5f62\u5f0f", "kcnr": "\u8003\u5bdf\u5185\u5bb9", "kcfs": "\u8003\u5bdf\u65b9\u5f0f", "zb": "\u5360\u6bd4"},
 }
 
 FILENAME_NOISE_PATTERNS = (
-    r"课程方案完整版",
-    r"课程方案",
-    r"课程实施方案",
-    r"教学大纲",
-    r"完整版",
-    r"最终版",
-    r"修订版",
-    r"新版",
+    r"\u8bfe\u7a0b\u65b9\u6848\u5b8c\u6574\u7248",
+    r"\u8bfe\u7a0b\u65b9\u6848",
+    r"\u8bfe\u7a0b\u5b9e\u65bd\u65b9\u6848",
+    r"\u6559\u5b66\u5927\u7eb2",
+    r"\u5b8c\u6574\u7248",
+    r"\u6700\u7ec8\u7248",
+    r"\u4fee\u8ba2\u7248",
+    r"\u65b0\u7248",
 )
 
 
@@ -224,7 +228,6 @@ def audit_subject(subject: AuditSubject, course_match: CourseMatch | dict[str, A
     findings.extend(_extraction_status_finding(subject.extraction_status))
 
     section_findings = [kcjbxx_section, jxnrxs_section, jxapzc_section]
-    section_findings.extend(_build_section_findings(findings))
     fail_count = sum(1 for item in findings if item.status in {FAIL, ERROR, "manual_review"})
     warning_count = sum(1 for item in findings if item.status == WARNING)
     overall_status = _overall_status(fail_count, warning_count, subject.extraction_status)
@@ -259,7 +262,7 @@ def _audit_basic_info(subject: AuditSubject, match: CourseMatch) -> tuple[list[F
                 expected={"match_status": match.status},
                 actual={"query": match.query, "source_path": subject.source_path},
                 evidence=_course_match_evidence(match, subject),
-                suggestion="请人工核对 PDF 文件名、课程编号、课程名称与课程库记录。",
+                suggestion="\u8bf7\u4eba\u5de5\u6838\u5bf9 PDF \u6587\u4ef6\u540d\u3001\u8bfe\u7a0b\u7f16\u53f7\u3001\u8bfe\u7a0b\u540d\u79f0\u4e0e\u8bfe\u7a0b\u5e93\u8bb0\u5f55\u3002",
             )
         )
         dimension_reasons.append(reason)
@@ -279,13 +282,13 @@ def _audit_basic_info(subject: AuditSubject, match: CourseMatch) -> tuple[list[F
         )
         findings.append(finding)
         if finding.status != PASS:
-            dimension_reasons.append(finding.message)
+            dimension_reasons.append(finding.reason or finding.message)
 
     hours_formula_finding = _basic_hours_formula_finding(jcxx)
     if hours_formula_finding:
         findings.append(hours_formula_finding)
         if hours_formula_finding.status != PASS:
-            dimension_reasons.append(hours_formula_finding.message)
+            dimension_reasons.append(hours_formula_finding.reason or hours_formula_finding.message)
 
     for pdf_field, label in INDEPENDENT_REQUIRED_JCXX_FIELDS:
         value = _exact_value(jcxx.get(pdf_field))
@@ -296,12 +299,12 @@ def _audit_basic_info(subject: AuditSubject, match: CourseMatch) -> tuple[list[F
                     field=pdf_field,
                     path=f"payload.jcxx.{pdf_field}",
                     status=PASS,
-                    message=f"{label}已填写。",
+                    message=f"{label}\u5df2\u586b\u5199\u3002",
                     actual=value,
                 )
             )
         else:
-            message = f"{label}为空"
+            message = f"{label}\u4e3a\u7a7a"
             findings.append(
                 FieldFinding(
                     section="jcxx",
@@ -311,18 +314,19 @@ def _audit_basic_info(subject: AuditSubject, match: CourseMatch) -> tuple[list[F
                     reason=message,
                     message=message,
                     actual="",
-                    suggestion=f"请补充 PDF 中的{label}。",
+                    suggestion=f"\u8bf7\u8865\u5145 PDF \u4e2d\u7684{label}\u3002",
                 )
             )
             dimension_reasons.append(message)
 
     failed = [item for item in findings if item.status in {FAIL, ERROR}]
     status = FAIL if failed else PASS
-    result = "否" if failed else "是"
+    result = NO if failed else YES
+    all_reasons = _dimension_reasons(dimension_reasons, failed) if failed else []
     details = {
         "label": KCJBXX_LABEL,
         "result": result,
-        "reasons": _dedupe([reason for reason in dimension_reasons if reason] if failed else []),
+        "reasons": all_reasons,
         "course_match": _course_match_summary(match, subject),
     }
     evidence = {
@@ -337,7 +341,7 @@ def _audit_basic_info(subject: AuditSubject, match: CourseMatch) -> tuple[list[F
         status=status,
         message=result,
         evidence=evidence,
-        suggestion="查看 audit_field_findings 中 section='jcxx' 的字段原因。" if failed else "",
+        suggestion="\u67e5\u770b audit_field_findings \u4e2d section='jcxx' \u7684\u5b57\u6bb5\u539f\u56e0\u3002" if failed else "",
         details=details,
     )
 
@@ -353,51 +357,20 @@ def _exact_match_finding(
 ) -> FieldFinding:
     path = f"payload.jcxx.{pdf_field}"
     if not has_course:
-        message = f"无法定位课程库记录，不能判断{label}是否一致"
-        return FieldFinding(
-            section="jcxx",
-            field=pdf_field,
-            path=path,
-            status=FAIL,
-            reason=message,
-            message=message,
-            expected="",
-            actual=pdf_value,
-            evidence={"course_field": course_field},
-            suggestion="先确认该 PDF 对应的课程库记录。",
-        )
+        message = f"\u65e0\u6cd5\u5b9a\u4f4d\u8bfe\u7a0b\u5e93\u8bb0\u5f55\uff0c\u4e0d\u80fd\u5224\u65ad{label}\u662f\u5426\u4e00\u81f4"
+        return FieldFinding(section="jcxx", field=pdf_field, path=path, status=FAIL, reason=message, message=message, expected="", actual=pdf_value, evidence={"course_field": course_field}, suggestion="\u5148\u786e\u8ba4\u8be5 PDF \u5bf9\u5e94\u7684\u8bfe\u7a0b\u5e93\u8bb0\u5f55\u3002")
     if not pdf_value and not course_value:
-        message = f"PDF 和课程库中的{label}都为空"
+        message = f"PDF \u548c\u8bfe\u7a0b\u5e93\u4e2d\u7684{label}\u90fd\u4e3a\u7a7a"
     elif not pdf_value:
-        message = f"{label}为空"
+        message = f"{label}\u4e3a\u7a7a"
     elif not course_value:
-        message = f"课程库中{label}为空"
+        message = f"\u8bfe\u7a0b\u5e93\u4e2d{label}\u4e3a\u7a7a"
     elif pdf_value != course_value:
-        message = f"{label}与课程库不一致：课程库为 {course_value}，PDF 为 {pdf_value}"
+        message = f"{label}\u4e0e\u8bfe\u7a0b\u5e93\u4e0d\u4e00\u81f4\uff1a\u8bfe\u7a0b\u5e93\u4e3a {course_value}\uff0cPDF \u4e3a {pdf_value}"
     else:
-        return FieldFinding(
-            section="jcxx",
-            field=pdf_field,
-            path=path,
-            status=PASS,
-            message=f"{label}与课程库一致。",
-            expected=course_value,
-            actual=pdf_value,
-            evidence={"course_field": course_field},
-        )
+        return FieldFinding(section="jcxx", field=pdf_field, path=path, status=PASS, message=f"{label}\u4e0e\u8bfe\u7a0b\u5e93\u4e00\u81f4\u3002", expected=course_value, actual=pdf_value, evidence={"course_field": course_field})
 
-    return FieldFinding(
-        section="jcxx",
-        field=pdf_field,
-        path=path,
-        status=FAIL,
-        reason=message,
-        message=message,
-        expected=course_value,
-        actual=pdf_value,
-        evidence={"course_field": course_field},
-        suggestion=f"请核对 PDF 和课程库中的{label}。",
-    )
+    return FieldFinding(section="jcxx", field=pdf_field, path=path, status=FAIL, reason=message, message=message, expected=course_value, actual=pdf_value, evidence={"course_field": course_field}, suggestion=f"\u8bf7\u6838\u5bf9 PDF \u548c\u8bfe\u7a0b\u5e93\u4e2d\u7684{label}\u3002")
 
 
 def _basic_hours_formula_finding(jcxx: dict[str, Any]) -> FieldFinding | None:
@@ -411,45 +384,15 @@ def _basic_hours_formula_finding(jcxx: dict[str, Any]) -> FieldFinding | None:
     skzs = _number_value(skzs_text)
     zongxs = _number_value(zongxs_text)
     if zxs is None or skzs is None or zongxs is None:
-        message = f"总学时、周学时或上课周数不是可计算数字：总学时为 {zongxs_text}，周学时为 {zxs_text}，上课周数为 {skzs_text}"
-        return FieldFinding(
-            section="jcxx",
-            field="zongxs",
-            path="payload.jcxx.zongxs",
-            status=FAIL,
-            reason=message,
-            message=message,
-            expected={"formula": "总学时 = 周学时 × 上课周数"},
-            actual={"zongxs": zongxs_text, "zxs": zxs_text, "skzs": skzs_text},
-            suggestion="请核对 PDF 中总学时、周学时和上课周数的填写。",
-        )
+        message = f"\u603b\u5b66\u65f6\u3001\u5468\u5b66\u65f6\u6216\u4e0a\u8bfe\u5468\u6570\u4e0d\u662f\u53ef\u8ba1\u7b97\u6570\u5b57\uff1a\u603b\u5b66\u65f6\u4e3a {zongxs_text}\uff0c\u5468\u5b66\u65f6\u4e3a {zxs_text}\uff0c\u4e0a\u8bfe\u5468\u6570\u4e3a {skzs_text}"
+        return FieldFinding(section="jcxx", field="zongxs", path="payload.jcxx.zongxs", status=FAIL, reason=message, message=message, expected={"formula": "\u603b\u5b66\u65f6 = \u5468\u5b66\u65f6 \u00d7 \u4e0a\u8bfe\u5468\u6570"}, actual={"zongxs": zongxs_text, "zxs": zxs_text, "skzs": skzs_text}, suggestion="\u8bf7\u6838\u5bf9 PDF \u4e2d\u603b\u5b66\u65f6\u3001\u5468\u5b66\u65f6\u548c\u4e0a\u8bfe\u5468\u6570\u7684\u586b\u5199\u3002")
 
     expected = zxs * skzs
     if expected == zongxs:
-        return FieldFinding(
-            section="jcxx",
-            field="zongxs",
-            path="payload.jcxx.zongxs",
-            status=PASS,
-            message="总学时等于周学时乘以上课周数。",
-            expected=expected,
-            actual=zongxs,
-            evidence={"formula": "zongxs = zxs * skzs", "zxs": zxs, "skzs": skzs},
-        )
+        return FieldFinding(section="jcxx", field="zongxs", path="payload.jcxx.zongxs", status=PASS, message="\u603b\u5b66\u65f6\u7b49\u4e8e\u5468\u5b66\u65f6\u4e58\u4ee5\u4e0a\u8bfe\u5468\u6570\u3002", expected=expected, actual=zongxs, evidence={"formula": "zongxs = zxs * skzs", "zxs": zxs, "skzs": skzs})
 
-    message = f"总学时不等于周学时乘以上课周数：总学时为 {zongxs_text}，周学时 {zxs_text} × 上课周数 {skzs_text} = {_format_number(expected)}"
-    return FieldFinding(
-        section="jcxx",
-        field="zongxs",
-        path="payload.jcxx.zongxs",
-        status=FAIL,
-        reason=message,
-        message=message,
-        expected=_format_number(expected),
-        actual=zongxs_text,
-        evidence={"formula": "zongxs = zxs * skzs", "zxs": zxs_text, "skzs": skzs_text},
-        suggestion="请核对 PDF 中总学时、周学时和上课周数是否一致。",
-    )
+    message = f"\u603b\u5b66\u65f6\u4e0d\u7b49\u4e8e\u5468\u5b66\u65f6\u4e58\u4ee5\u4e0a\u8bfe\u5468\u6570\uff1a\u603b\u5b66\u65f6\u4e3a {zongxs_text}\uff0c\u5468\u5b66\u65f6 {zxs_text} \u00d7 \u4e0a\u8bfe\u5468\u6570 {skzs_text} = {_format_number(expected)}"
+    return FieldFinding(section="jcxx", field="zongxs", path="payload.jcxx.zongxs", status=FAIL, reason=message, message=message, expected=_format_number(expected), actual=zongxs_text, evidence={"formula": "zongxs = zxs * skzs", "zxs": zxs_text, "skzs": skzs_text}, suggestion="\u8bf7\u6838\u5bf9 PDF \u4e2d\u603b\u5b66\u65f6\u3001\u5468\u5b66\u65f6\u548c\u4e0a\u8bfe\u5468\u6570\u662f\u5426\u4e00\u81f4\u3002")
 
 
 def _required_payload_findings(payload: dict[str, Any]) -> list[FieldFinding]:
@@ -636,15 +579,16 @@ def _build_section_findings(field_findings: list[FieldFinding]) -> list[SectionF
             continue
         fail_count = sum(1 for item in items if item.status in {FAIL, ERROR, "manual_review"})
         warning_count = sum(1 for item in items if item.status == WARNING)
+        section_label = audit_wd_label(section)
         if fail_count:
             status = FAIL
-            message = f"{section} 有 {fail_count} 个不通过字段。"
+            message = f"{section_label}有 {fail_count} 个不通过字段。"
         elif warning_count:
             status = WARNING
-            message = f"{section} 有 {warning_count} 个警告字段。"
+            message = f"{section_label}有 {warning_count} 个警告字段。"
         else:
             status = PASS
-            message = f"{section} 通过。"
+            message = f"{section_label}通过。"
         result.append(
             SectionFinding(
                 wd=section,
@@ -754,6 +698,13 @@ def _dedupe(values: list[str]) -> list[str]:
     return result
 
 
+def _dimension_reasons(existing: list[str], failed: list[FieldFinding]) -> list[str]:
+    reasons = list(existing)
+    for item in failed:
+        reasons.append(item.reason or item.message)
+    return _dedupe([reason for reason in reasons if reason])
+
+
 def _is_empty(value: Any) -> bool:
     if value is None:
         return True
@@ -809,103 +760,36 @@ def _format_number(value: float) -> str:
 
 
 def _audit_teaching_content_hours(payload: dict[str, Any], meta: dict[str, Any]) -> tuple[FieldFinding, SectionFinding]:
-    jcxx_total = _resolve_semantic_number(
-        payload_value=_as_dict(payload.get("jcxx")).get("zongxs"),
-        payload_path="payload.jcxx.zongxs",
-        semantic_field="jcxx.zongxs",
-        meta=meta,
-        section_hints=("课程基本信息", "基本信息", "课程信息"),
-        value_keywords=("总学时", "课程总学时"),
-    )
-    jxnr_total = _resolve_semantic_number(
-        payload_value=_as_dict(payload.get("jxnr")).get("zongxs"),
-        payload_path="payload.jxnr.zongxs",
-        semantic_field="jxnr.zongxs",
-        meta=meta,
-        section_hints=("教学内容", "课程内容"),
-        value_keywords=("总学时", "合计", "合计学时", "小计"),
-    )
-    evidence = {
-        "jcxx_zongxs": jcxx_total,
-        "jxnr_zongxs": jxnr_total,
-        "fallback_used": jcxx_total.get("source") == "meta" or jxnr_total.get("source") == "meta",
-    }
+    jcxx_total = _resolve_semantic_number(payload_value=_as_dict(payload.get("jcxx")).get("zongxs"), payload_path="payload.jcxx.zongxs", semantic_field="jcxx.zongxs", meta=meta, section_hints=("\u8bfe\u7a0b\u57fa\u672c\u4fe1\u606f", "\u57fa\u672c\u4fe1\u606f", "\u8bfe\u7a0b\u4fe1\u606f"), value_keywords=("\u603b\u5b66\u65f6", "\u8bfe\u7a0b\u603b\u5b66\u65f6"))
+    jxnr_total = _resolve_semantic_number(payload_value=_as_dict(payload.get("jxnr")).get("zongxs"), payload_path="payload.jxnr.zongxs", semantic_field="jxnr.zongxs", meta=meta, section_hints=("\u6559\u5b66\u5185\u5bb9", "\u8bfe\u7a0b\u5185\u5bb9"), value_keywords=("\u603b\u5b66\u65f6", "\u5408\u8ba1", "\u5408\u8ba1\u5b66\u65f6", "\u5c0f\u8ba1"))
+    evidence = {"jcxx_zongxs": jcxx_total, "jxnr_zongxs": jxnr_total, "fallback_used": jcxx_total.get("source") == "meta" or jxnr_total.get("source") == "meta"}
 
     reasons: list[str] = []
     if jcxx_total.get("ambiguous") or jxnr_total.get("ambiguous"):
-        reasons.append("meta 中总学时来源无法区分，需人工复核")
+        reasons.append("meta \u4e2d\u603b\u5b66\u65f6\u6765\u6e90\u65e0\u6cd5\u533a\u5206\uff0c\u9700\u4eba\u5de5\u590d\u6838")
     if jcxx_total.get("number") is None:
-        reasons.append("基础信息总学时为空" if not jcxx_total.get("raw_value") else "基础信息总学时不是可计算数字")
+        reasons.append("\u57fa\u7840\u4fe1\u606f\u603b\u5b66\u65f6\u4e3a\u7a7a" if not jcxx_total.get("raw_value") else "\u57fa\u7840\u4fe1\u606f\u603b\u5b66\u65f6\u4e0d\u662f\u53ef\u8ba1\u7b97\u6570\u5b57")
     if jxnr_total.get("number") is None:
-        reasons.append("教学内容总学时为空" if not jxnr_total.get("raw_value") else "教学内容总学时不是可计算数字")
-    if (
-        jcxx_total.get("source") == "meta"
-        and jxnr_total.get("source") == "meta"
-        and jcxx_total.get("source_path") == jxnr_total.get("source_path")
-        and jcxx_total.get("snippet") == jxnr_total.get("snippet")
-    ):
-        reasons.append("meta 中总学时来源无法区分，需人工复核")
+        reasons.append("\u6559\u5b66\u5185\u5bb9\u603b\u5b66\u65f6\u4e3a\u7a7a" if not jxnr_total.get("raw_value") else "\u6559\u5b66\u5185\u5bb9\u603b\u5b66\u65f6\u4e0d\u662f\u53ef\u8ba1\u7b97\u6570\u5b57")
+    if jcxx_total.get("source") == "meta" and jxnr_total.get("source") == "meta" and jcxx_total.get("source_path") == jxnr_total.get("source_path") and jcxx_total.get("snippet") == jxnr_total.get("snippet"):
+        reasons.append("meta \u4e2d\u603b\u5b66\u65f6\u6765\u6e90\u65e0\u6cd5\u533a\u5206\uff0c\u9700\u4eba\u5de5\u590d\u6838")
 
     jcxx_number = jcxx_total.get("number")
     jxnr_number = jxnr_total.get("number")
     if not reasons and jcxx_number != jxnr_number:
-        reasons.append(f"教学内容总学时与基础信息总学时不一致：基础信息为 {jcxx_number}，教学内容为 {jxnr_number}")
+        reasons.append(f"\u6559\u5b66\u5185\u5bb9\u603b\u5b66\u65f6\u4e0e\u57fa\u7840\u4fe1\u606f\u603b\u5b66\u65f6\u4e0d\u4e00\u81f4\uff1a\u57fa\u7840\u4fe1\u606f\u4e3a {jcxx_number}\uff0c\u6559\u5b66\u5185\u5bb9\u4e3a {jxnr_number}")
 
     reasons = _dedupe(reasons)
     if reasons:
-        reason = reasons[0]
-        field_finding = FieldFinding(
-            section="jxnr",
-            field="zongxs",
-            path="payload.jxnr.zongxs",
-            status=FAIL,
-            reason=reason,
-            message=reason,
-            expected=jcxx_total,
-            actual=jxnr_total,
-            evidence=evidence,
-            suggestion="请核对基础信息和教学内容中的总学时填写是否一致；结构化字段缺失时复核 PDF 原文对应章节。",
-        )
-        section_finding = SectionFinding(
-            wd=JXNRXS_WD,
-            status=FAIL,
-            message="否",
-            evidence=evidence,
-            suggestion="查看 audit_field_findings 中 section='jxnr'、field='zongxs' 的字段原因。",
-            details={"label": JXNRXS_LABEL, "result": "否", "reasons": reasons},
-        )
-        return field_finding, section_finding
+        reason = "\uff1b".join(reasons)
+        return FieldFinding(section="jxnr", field="zongxs", path="payload.jxnr.zongxs", status=FAIL, reason=reason, message=reason, expected=jcxx_total, actual=jxnr_total, evidence=evidence, suggestion="\u8bf7\u6838\u5bf9\u57fa\u7840\u4fe1\u606f\u548c\u6559\u5b66\u5185\u5bb9\u4e2d\u7684\u603b\u5b66\u65f6\u586b\u5199\u662f\u5426\u4e00\u81f4\u3002"), SectionFinding(wd=JXNRXS_WD, status=FAIL, message=NO, evidence=evidence, suggestion="\u67e5\u770b audit_field_findings \u4e2d section='jxnr'\u3001field='zongxs' \u7684\u5b57\u6bb5\u539f\u56e0\u3002", details={"label": JXNRXS_LABEL, "result": NO, "reasons": reasons})
 
-    message = "教学内容总学时与基础信息总学时一致。"
-    field_finding = FieldFinding(
-        section="jxnr",
-        field="zongxs",
-        path="payload.jxnr.zongxs",
-        status=PASS,
-        message=message,
-        expected=jcxx_total,
-        actual=jxnr_total,
-        evidence=evidence,
-    )
-    section_finding = SectionFinding(
-        wd=JXNRXS_WD,
-        status=PASS,
-        message="是",
-        evidence=evidence,
-        details={"label": JXNRXS_LABEL, "result": "是", "reasons": []},
-    )
-    return field_finding, section_finding
+    message = "\u6559\u5b66\u5185\u5bb9\u603b\u5b66\u65f6\u4e0e\u57fa\u7840\u4fe1\u606f\u603b\u5b66\u65f6\u4e00\u81f4\u3002"
+    return FieldFinding(section="jxnr", field="zongxs", path="payload.jxnr.zongxs", status=PASS, message=message, expected=jcxx_total, actual=jxnr_total, evidence=evidence), SectionFinding(wd=JXNRXS_WD, status=PASS, message=YES, evidence=evidence, details={"label": JXNRXS_LABEL, "result": YES, "reasons": []})
 
 
 def _audit_schedule_weeks(payload: dict[str, Any], meta: dict[str, Any]) -> tuple[FieldFinding, SectionFinding]:
-    skzs = _resolve_semantic_number(
-        payload_value=_as_dict(payload.get("jcxx")).get("skzs"),
-        payload_path="payload.jcxx.skzs",
-        semantic_field="jcxx.skzs",
-        meta=meta,
-        section_hints=("课程基本信息", "基本信息", "课程信息"),
-        value_keywords=("上课周数", "授课周数", "教学周数"),
-    )
+    skzs = _resolve_semantic_number(payload_value=_as_dict(payload.get("jcxx")).get("skzs"), payload_path="payload.jcxx.skzs", semantic_field="jcxx.skzs", meta=meta, section_hints=("\u8bfe\u7a0b\u57fa\u672c\u4fe1\u606f", "\u57fa\u672c\u4fe1\u606f", "\u8bfe\u7a0b\u4fe1\u606f"), value_keywords=("\u4e0a\u8bfe\u5468\u6570", "\u6388\u8bfe\u5468\u6570", "\u6559\u5b66\u5468\u6570"))
     schedule = _resolve_schedule_weeks(payload, meta)
     expected_week = skzs.get("number")
     parsed_weeks = sorted(schedule["weeks"])
@@ -915,78 +799,28 @@ def _audit_schedule_weeks(payload: dict[str, Any], meta: dict[str, Any]) -> tupl
 
     reasons: list[str] = []
     if expected_week is None:
-        reasons.append("基础信息上课周数为空" if not skzs.get("raw_value") else "基础信息上课周数不是可计算数字")
+        reasons.append("\u57fa\u7840\u4fe1\u606f\u4e0a\u8bfe\u5468\u6570\u4e3a\u7a7a" if not skzs.get("raw_value") else "\u57fa\u7840\u4fe1\u606f\u4e0a\u8bfe\u5468\u6570\u4e0d\u662f\u53ef\u8ba1\u7b97\u6570\u5b57")
     if not parsed_weeks:
-        reasons.append("教学安排周次为空，无法判断周次是否连续")
+        reasons.append("\u6559\u5b66\u5b89\u6392\u5468\u6b21\u4e3a\u7a7a\uff0c\u65e0\u6cd5\u5224\u65ad\u5468\u6b21\u662f\u5426\u8fde\u7eed")
     if schedule["errors"]:
         reasons.extend(schedule["errors"])
     if missing_weeks:
-        reasons.append(f"教学安排周次不连续，缺少{_format_week_list(missing_weeks)}")
+        reasons.append(f"\u6559\u5b66\u5b89\u6392\u5468\u6b21\u4e0d\u8fde\u7eed\uff0c\u7f3a\u5c11{_format_week_list(missing_weeks)}")
     if duplicate_weeks:
-        reasons.append(f"教学安排周次重复，重复周次为{_format_week_list(duplicate_weeks)}")
+        reasons.append(f"\u6559\u5b66\u5b89\u6392\u5468\u6b21\u91cd\u590d\uff0c\u91cd\u590d\u5468\u6b21\u4e3a{_format_week_list(duplicate_weeks)}")
     if expected_week is not None and max_week is not None and max_week != expected_week:
-        reasons.append(f"教学安排最大周次为 {max_week}，基础信息上课周数为 {expected_week}")
+        reasons.append(f"\u6559\u5b66\u5b89\u6392\u6700\u5927\u5468\u6b21\u4e3a {max_week}\uff0c\u57fa\u7840\u4fe1\u606f\u4e0a\u8bfe\u5468\u6570\u4e3a {expected_week}")
 
-    schedule_evidence = {
-        **schedule,
-        "weeks": parsed_weeks,
-        "duplicates": duplicate_weeks,
-    }
-    evidence = {
-        "jcxx_skzs": skzs,
-        "schedule_weeks": schedule_evidence,
-        "expected_skzs": expected_week,
-        "parsed_weeks": parsed_weeks,
-        "missing_weeks": missing_weeks,
-        "duplicate_weeks": duplicate_weeks,
-        "max_week": max_week,
-        "fallback_used": skzs.get("source") == "meta" or schedule.get("source") == "meta",
-    }
+    schedule_evidence = {**schedule, "weeks": parsed_weeks, "duplicates": duplicate_weeks}
+    evidence = {"jcxx_skzs": skzs, "schedule_weeks": schedule_evidence, "expected_skzs": expected_week, "parsed_weeks": parsed_weeks, "missing_weeks": missing_weeks, "duplicate_weeks": duplicate_weeks, "max_week": max_week, "fallback_used": skzs.get("source") == "meta" or schedule.get("source") == "meta"}
 
     reasons = _dedupe(reasons)
     if reasons:
-        reason = reasons[0]
-        field_finding = FieldFinding(
-            section="jxap",
-            field="zs",
-            path="payload.jxap.tm[].zs",
-            status=FAIL,
-            reason=reason,
-            message=reason,
-            expected=skzs,
-            actual=schedule_evidence,
-            evidence=evidence,
-            suggestion="请核对教学安排表的周次是否从第 1 周开始连续覆盖，并与基础信息上课周数一致。",
-        )
-        section_finding = SectionFinding(
-            wd=JXAPZC_WD,
-            status=FAIL,
-            message="否",
-            evidence=evidence,
-            suggestion="查看 audit_field_findings 中 section='jxap'、field='zs' 的字段原因。",
-            details={"label": JXAPZC_LABEL, "result": "否", "reasons": reasons},
-        )
-        return field_finding, section_finding
+        reason = "\uff1b".join(reasons)
+        return FieldFinding(section="jxap", field="zs", path="payload.jxap.tm[].zs", status=FAIL, reason=reason, message=reason, expected=skzs, actual=schedule_evidence, evidence=evidence, suggestion="\u8bf7\u6838\u5bf9\u6559\u5b66\u5b89\u6392\u8868\u7684\u5468\u6b21\u662f\u5426\u4ece\u7b2c 1 \u5468\u5f00\u59cb\u8fde\u7eed\u8986\u76d6\uff0c\u5e76\u4e0e\u57fa\u7840\u4fe1\u606f\u4e0a\u8bfe\u5468\u6570\u4e00\u81f4\u3002"), SectionFinding(wd=JXAPZC_WD, status=FAIL, message=NO, evidence=evidence, suggestion="\u67e5\u770b audit_field_findings \u4e2d section='jxap'\u3001field='zs' \u7684\u5b57\u6bb5\u539f\u56e0\u3002", details={"label": JXAPZC_LABEL, "result": NO, "reasons": reasons})
 
-    message = "教学安排周次连续，且最大周次与基础信息上课周数一致。"
-    field_finding = FieldFinding(
-        section="jxap",
-        field="zs",
-        path="payload.jxap.tm[].zs",
-        status=PASS,
-        message=message,
-        expected=skzs,
-        actual=schedule_evidence,
-        evidence=evidence,
-    )
-    section_finding = SectionFinding(
-        wd=JXAPZC_WD,
-        status=PASS,
-        message="是",
-        evidence=evidence,
-        details={"label": JXAPZC_LABEL, "result": "是", "reasons": []},
-    )
-    return field_finding, section_finding
+    message = "\u6559\u5b66\u5b89\u6392\u5468\u6b21\u8fde\u7eed\uff0c\u4e14\u6700\u5927\u5468\u6b21\u4e0e\u57fa\u7840\u4fe1\u606f\u4e0a\u8bfe\u5468\u6570\u4e00\u81f4\u3002"
+    return FieldFinding(section="jxap", field="zs", path="payload.jxap.tm[].zs", status=PASS, message=message, expected=skzs, actual=schedule_evidence, evidence=evidence), SectionFinding(wd=JXAPZC_WD, status=PASS, message=YES, evidence=evidence, details={"label": JXAPZC_LABEL, "result": YES, "reasons": []})
 
 
 def _resolve_semantic_number(
@@ -1120,16 +954,9 @@ def _resolve_schedule_weeks(payload: dict[str, Any], meta: dict[str, Any]) -> di
 def _schedule_week_values_from_meta(meta: dict[str, Any]) -> list[dict[str, str]]:
     values: list[dict[str, str]] = []
     for source in _meta_text_sources(meta):
-        for item in _section_snippets(source["text"], ("教学安排", "课程安排", "授课安排")):
-            for match in re.finditer(r"(?:第?\d+\s*(?:周|週)?\s*(?:[-~—–至到]\s*\d+\s*(?:周|週)?)?)(?:\s*[,，、;；]\s*第?\d+\s*(?:周|週)?\s*(?:[-~—–至到]\s*\d+\s*(?:周|週)?)?)*", item["snippet"]):
-                values.append(
-                    {
-                        "raw_value": match.group(0),
-                        "source_path": source["source_path"],
-                        "section_hint": item["section_hint"],
-                        "snippet": item["snippet"][:500],
-                    }
-                )
+        for item in _section_snippets(source["text"], ("\u6559\u5b66\u5b89\u6392", "\u8bfe\u7a0b\u5b89\u6392", "\u6388\u8bfe\u5b89\u6392", "\u6559\u5b66\u8fdb\u5ea6")):
+            for match in re.finditer(r"(?:\u7b2c?\s*\d+\s*(?:\u5468|\u5468\u6b21)?\s*(?:[-~\u2014\u2013\u81f3\u5230]\s*\d+\s*(?:\u5468|\u5468\u6b21)?)?)(?:\s*[,\uff0c\u3001\uff1b;]\s*\u7b2c?\s*\d+\s*(?:\u5468|\u5468\u6b21)?\s*(?:[-~\u2014\u2013\u81f3\u5230]\s*\d+\s*(?:\u5468|\u5468\u6b21)?)?)*", item["snippet"]):
+                values.append({"raw_value": match.group(0), "source_path": source["source_path"], "section_hint": item["section_hint"], "snippet": item["snippet"][:500]})
     return values
 
 
@@ -1157,19 +984,19 @@ def _parse_week_expression(value: Any) -> dict[str, Any]:
     weeks: set[int] = set()
     errors: list[str] = []
     masked = text
-    range_pattern = re.compile(r"第?\s*(\d+)\s*(?:周|週)?\s*[-~—–至到]\s*(\d+)\s*(?:周|週)?")
+    range_pattern = re.compile(r"\u7b2c?\s*(\d+)\s*(?:\u5468|\u5468\u6b21)?\s*[-~\u2014\u2013\u81f3\u5230]\s*(\d+)\s*(?:\u5468|\u5468\u6b21)?")
     for match in range_pattern.finditer(text):
         start = int(match.group(1))
         end = int(match.group(2))
         if start > end:
-            errors.append(f"教学安排周次区间不合法：{match.group(0)}")
+            errors.append(f"\u6559\u5b66\u5b89\u6392\u5468\u6b21\u533a\u95f4\u4e0d\u5408\u6cd5\uff1a{match.group(0)}")
         else:
             weeks.update(range(start, end + 1))
         masked = masked.replace(match.group(0), " ")
-    for match in re.finditer(r"第?\s*(\d+)\s*(?:周|週)?", masked):
+    for match in re.finditer(r"\u7b2c?\s*(\d+)\s*(?:\u5468|\u5468\u6b21)?", masked):
         weeks.add(int(match.group(1)))
     if not weeks and text:
-        errors.append(f"教学安排周次无法解析：{text}")
+        errors.append(f"\u6559\u5b66\u5b89\u6392\u5468\u6b21\u65e0\u6cd5\u89e3\u6790\uff1a{text}")
     return {"weeks": weeks, "errors": errors}
 
 
