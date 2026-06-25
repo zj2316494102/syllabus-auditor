@@ -1,0 +1,93 @@
+from __future__ import annotations
+
+from syllabus_auditor.auditors.jxmbnrfsfhyq import audit_jxmbnrfsfhyq
+from syllabus_auditor.auditors.szysfyxrghj import audit_szysfyxrghj
+from syllabus_auditor.core.audit import AuditRunSummary, audit_subject, build_run_name, refresh_subject_audit
+from syllabus_auditor.core.db.audit import AuditStore
+from syllabus_auditor.core.llm import load_llm_client
+
+
+DEFAULT_AUDITORS = [
+    "kcjbxxsfykckyz",
+    "jxnrsfyxspp",
+    "jxapsfyzcpp",
+    "jxmbnrfsfhyq",
+    "szysfyxrghj",
+    "kcmb",
+    "jxnr",
+    "jxap",
+    "kcyq",
+    "khfsb",
+]
+
+
+def run_batch_audit(
+    *,
+    run_name: str | None = None,
+    import_term: str | None = None,
+    latest_only: bool = True,
+    store: AuditStore | None = None,
+) -> AuditRunSummary:
+    store = store or AuditStore()
+    llm_client = load_llm_client()
+    subjects = store.list_subjects(latest_only=latest_only)
+    run_id = store.create_run(
+        run_name=run_name or build_run_name(),
+        import_term=import_term,
+        auditors=DEFAULT_AUDITORS,
+        config_snapshot={
+            "version": 1,
+            "latest_only": latest_only,
+            "auditors": DEFAULT_AUDITORS,
+            "audit_modes": {
+                "kcjbxxsfykckyz": {"type": "rule"},
+                "jxnrsfyxspp": {"type": "rule"},
+                "jxapsfyzcpp": {"type": "rule"},
+                "jxmbnrfsfhyq": {"type": "direct_llm", "enabled": llm_client is not None},
+                "szysfyxrghj": {"type": "direct_llm", "enabled": llm_client is not None},
+            },
+            "field_results": "all",
+        },
+        course_total=len(subjects),
+    )
+
+    pass_count = 0
+    fail_count = 0
+    partial_count = 0
+    error_count = 0
+
+    try:
+        for subject in subjects:
+            course_match = store.match_course(subject)
+            audit = audit_subject(subject, course_match)
+            jx_section, jx_fields = audit_jxmbnrfsfhyq(subject, llm_client)
+            audit.section_findings.append(jx_section)
+            audit.field_findings.extend(jx_fields)
+            sz_section, sz_fields = audit_szysfyxrghj(subject, llm_client)
+            audit.section_findings.append(sz_section)
+            audit.field_findings.extend(sz_fields)
+            refresh_subject_audit(audit)
+            store.save_subject_audit(run_id=run_id, audit=audit)
+
+            if audit.overall_status == "pass":
+                pass_count += 1
+            elif audit.overall_status == "fail":
+                fail_count += 1
+            elif audit.overall_status == "error":
+                error_count += 1
+            else:
+                partial_count += 1
+
+        summary = AuditRunSummary(
+            run_id=run_id,
+            total=len(subjects),
+            pass_count=pass_count,
+            fail_count=fail_count,
+            partial_count=partial_count,
+            error_count=error_count,
+        )
+        store.complete_run(summary)
+        return summary
+    except Exception as exc:
+        store.fail_run(run_id=run_id, error_message=f"{type(exc).__name__}: {exc}")
+        raise
