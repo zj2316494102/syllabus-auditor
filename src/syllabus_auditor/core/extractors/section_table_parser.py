@@ -107,25 +107,16 @@ PROFILES = [
             "思政元素的融入和预期教学成效": (
                 "思政元素的融入和预期教学成效",
                 "思政元素和预期教学成效",
+                "思政元素的融入及预期教学成效",
+                "思政元素融入和预期教学成效",
+                "融入的思政元素和预期教学成效",
+                "课程思政元素的融入",
                 "思政元素",
                 "预期教学成效",
                 "课程思政",
                 "思政融入",
+                "思政元素融入",
             ),
-        },
-    ),
-    SectionProfile(
-        name="课程要求",
-        result_key="course_requirements",
-        first_field="要求类型",
-        required=("要求内容",),
-        min_header_hits=2,
-        fields={
-            "要求类型": ("要求类型", "要求项目", "项目", "类别", "课程要求", "学习要求", "课堂要求"),
-            "要求内容": ("要求内容", "具体要求", "内容", "说明", "要求"),
-            "作业要求": ("作业要求", "作业", "课后作业"),
-            "考勤要求": ("考勤要求", "考勤", "出勤"),
-            "阅读要求": ("阅读要求", "阅读", "阅读材料"),
         },
     ),
     SectionProfile(
@@ -134,10 +125,10 @@ PROFILES = [
         first_field="考试形式",
         required=("考试形式",),
         fields={
-            "考试形式": ("考试形式", "考核形式", "考核环节", "考核项目", "项目"),
-            "考察内容": ("考察内容", "考核内容", "内容"),
-            "考察方式": ("考察方式", "考核方式", "方式"),
-            "占比": ("占比", "比例", "权重", "成绩占比"),
+            "考试形式": ("考试形式", "考核形式", "考核环节", "考核项目", "项目", "成绩构成"),
+            "考察内容": ("考察内容", "考核内容", "内容", "评价内容"),
+            "考察方式": ("考察方式", "考核方式", "方式", "评价方式"),
+            "占比": ("占比", "比例", "权重", "成绩占比", "分值比例"),
         },
     ),
 ]
@@ -153,6 +144,14 @@ def _field_for_header(profile: SectionProfile, header: str) -> str | None:
     normalized = normalize_label(header)
     if not normalized:
         return None
+
+    header_flat = re.sub(r"\s+", "", header or "")
+    if profile.name == "教学安排" and any(
+        token in header_flat
+        for token in ("思政", "预期教学成效", "课程思政", "思政元素", "思政融入")
+    ):
+        return "思政元素的融入和预期教学成效"
+
     best_field: str | None = None
     best_len = 0
     for field, aliases in profile.fields.items():
@@ -196,13 +195,20 @@ def _detect_header(
                     headers[col_index] = header
             hits = len(set(col_map.values()))
             required_hits = sum(1 for field in profile.required if field in col_map.values())
-            if hits >= profile.min_header_hits and (required_hits or profile.name == "课程要求"):
+            if hits >= profile.min_header_hits and required_hits:
                 score = hits * 10 + required_hits
                 if best is None or score > best[0]:
                     best = (score, row_index, profile, col_map, headers)
 
     if best is not None:
         _, row_index, profile, col_map, headers = best
+        if (
+            active
+            and active.profile.name == profile.name
+            and row_index == 0
+            and is_sequence(_cell(table[0], 0))
+        ):
+            return active, 0, []
         missing = [field for field in profile.required if field not in col_map.values()]
         if missing:
             warnings.append(
@@ -228,14 +234,7 @@ def _detect_header(
         return ActiveTable(profile, col_map, headers, max(len(row) for row in table)), row_index + 1, warnings
 
     if active and _looks_like_continuation(table, active):
-        warnings.append(
-            {
-                "section": active.profile.name,
-                "reason": "continued_table_without_header",
-                "confidence": "medium",
-            }
-        )
-        return active, 0, warnings
+        return active, 0, []
 
     return None, 0, warnings
 
@@ -244,8 +243,6 @@ def _looks_like_continuation(table: list[list[str | None]], active: ActiveTable)
     if not table or not table[0] or len(table[0]) < 2:
         return False
     col_count = max(len(row) for row in table)
-    if abs(col_count - active.col_count) > 2:
-        return False
     non_empty_rows = [
         row
         for row in table[:5]
@@ -253,9 +250,21 @@ def _looks_like_continuation(table: list[list[str | None]], active: ActiveTable)
     ]
     if not non_empty_rows:
         return False
-    if any(is_sequence(_cell(row, 0)) for row in non_empty_rows):
+
+    has_seq = any(is_sequence(_cell(row, 0)) for row in non_empty_rows)
+    drift = abs(col_count - active.col_count)
+
+    if drift > 4:
+        return False
+    if drift > 2 and not has_seq:
+        return False
+
+    if has_seq:
         return True
-    return any(not clean_text(row[0]) and sum(bool(clean_text(cell)) for cell in row[1:]) >= 1 for row in non_empty_rows)
+    return any(
+        not clean_text(row[0]) and sum(bool(clean_text(cell)) for cell in row[1:]) >= 1
+        for row in non_empty_rows
+    )
 
 
 def _mapped_row(row: list[str | None], active: ActiveTable) -> dict[str, Any]:
@@ -303,8 +312,6 @@ def _append_rows(rows: list[list[str | None]], active: ActiveTable, result: list
         starts_new = bool(first_value and (is_sequence(first_value) or not result))
         if active.profile.name == "考核方式" and first_value:
             starts_new = True
-        if active.profile.name == "课程要求" and first_value and not result:
-            starts_new = True
 
         if starts_new or not result:
             result.append(item)
@@ -319,6 +326,7 @@ def parse_section_tables(tables: list[list[list[str | None]]]) -> dict[str, Any]
         "assessment_rows": [],
         "course_requirements": [],
         "warnings": [],
+        "continuation_info": [],
     }
     active: ActiveTable | None = None
     for table in tables:
@@ -332,6 +340,14 @@ def parse_section_tables(tables: list[list[list[str | None]]]) -> dict[str, Any]
         if not detected:
             active = None
             continue
+
+        if (
+            active is not None
+            and detected.profile.name == active.profile.name
+            and start_row == 0
+            and _looks_like_continuation(table, active)
+        ):
+            results["continuation_info"].append({"section": active.profile.name, "merged": True})
 
         active = detected
         rows = table[start_row:]

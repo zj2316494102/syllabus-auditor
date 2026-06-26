@@ -158,7 +158,25 @@ def parse_sections_from_text(data: dict[str, str], full_text: str) -> None:
 
     data["课程要求"] = extract_section(text, "课程要求", _section_titles("teaching_content") + _section_titles("course_schedule") + _section_titles("reading_material") + _section_titles("assessment"))
     data["阅读材料"] = extract_section(text, "阅读材料", _section_titles("course_requirements") + _section_titles("assessment"))
-    data["考核方式说明"] = extract_section(text, "考核方式", _section_titles("course_requirements") + _section_titles("reading_material"), prefer_last=True)
+
+
+def apply_khfsb_source(
+    data: dict[str, str],
+    full_text: str,
+    assessment_rows: list[dict[str, Any]],
+) -> str:
+    """考核方式类型判别：识别到考核表 → table/tm；否则 → text/khgs（二者互斥）。"""
+    if assessment_rows:
+        data["考核方式说明"] = ""
+        return "table"
+    text = normalize_full_text(full_text)
+    data["考核方式说明"] = extract_section(
+        text,
+        "考核方式",
+        _section_titles("course_requirements") + _section_titles("reading_material"),
+        prefer_last=True,
+    )
+    return "text"
 
 
 def fill_overview_fallbacks(data: dict[str, str], full_text: str, teaching_content: list[dict[str, str]], course_schedule: list[dict[str, str]]) -> None:
@@ -205,6 +223,7 @@ class PdfPlumberExtractor(BaseExtractor):
         course_goal_extras = parse_course_goal_extras(all_tables)
 
         parse_sections_from_text(data, full_text)
+        khfsb_format = apply_khfsb_source(data, full_text, assessment_rows)
         fill_overview_fallbacks(data, full_text, teaching_content, course_schedule)
 
         raw = ExtractionRaw(
@@ -218,6 +237,7 @@ class PdfPlumberExtractor(BaseExtractor):
             course_requirements=course_requirements,
             course_goal_extras=course_goal_extras,
             extraction_warnings=extraction_warnings,
+            section_extraction={"khfsb_format": khfsb_format},
             source_path=pdf_path,
         )
         return enhance_raw_extraction(raw, pdf_path)

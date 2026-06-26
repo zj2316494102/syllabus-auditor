@@ -31,6 +31,39 @@ def score_rows(rows: list[dict[str, Any]], required_fields: tuple[str, ...]) -> 
     return complete * 80 + row_bonus * 20
 
 
+def score_rows_weighted(
+    rows: list[dict[str, Any]],
+    *,
+    required: tuple[str, ...],
+    weighted: dict[str, int] | None = None,
+    min_rows: int = 1,
+    warning_penalty: int = 5,
+    warnings: list[dict[str, Any]] | None = None,
+) -> float:
+    if not rows:
+        return 0.0
+
+    weighted = weighted or {}
+    base = row_completeness(rows, required) * 50.0
+
+    if weighted:
+        weight_total = sum(weighted.values()) or 1
+        weight_hits = sum(
+            weight
+            for row in rows
+            for field, weight in weighted.items()
+            if str(row.get(field, "")).strip()
+        )
+        base += (weight_hits / (len(rows) * weight_total)) * 30.0
+
+    row_bonus = min(len(rows), 20) / 20 * 20.0
+    if len(rows) < min_rows:
+        base *= len(rows) / max(min_rows, 1)
+
+    penalty = len(warnings or []) * warning_penalty
+    return max(base + row_bonus - penalty, 0.0)
+
+
 def make_row_candidate(
     section: str,
     source: str,
@@ -39,15 +72,45 @@ def make_row_candidate(
     *,
     warnings: list[dict[str, Any]] | None = None,
     evidence: dict[str, Any] | None = None,
+    scoring_config: dict[str, Any] | None = None,
 ) -> ExtractionCandidate:
+    if scoring_config:
+        score = score_rows_weighted(
+            rows,
+            required=tuple(scoring_config.get("required") or required_fields),
+            weighted=scoring_config.get("weighted") or {},
+            min_rows=int(scoring_config.get("min_rows", 1)),
+            warnings=warnings,
+        )
+    else:
+        score = score_rows(rows, required_fields)
+
     return ExtractionCandidate(
         section=section,
         source=source,
         rows=rows,
         warnings=list(warnings or []),
         evidence=dict(evidence or {}),
-        score=score_rows(rows, required_fields),
+        score=score,
     )
+
+
+def apply_fusion_scoring(
+    candidate: ExtractionCandidate,
+    scoring_config: dict[str, Any] | None,
+    *,
+    required_fields: tuple[str, ...] = (),
+) -> ExtractionCandidate:
+    if not scoring_config:
+        return candidate
+    candidate.score = score_rows_weighted(
+        candidate.rows,
+        required=tuple(scoring_config.get("required") or required_fields),
+        weighted=scoring_config.get("weighted") or {},
+        min_rows=int(scoring_config.get("min_rows", 1)),
+        warnings=candidate.warnings,
+    )
+    return candidate
 
 
 def choose_candidate(

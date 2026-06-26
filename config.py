@@ -19,6 +19,8 @@ EXTRACTION_CONFIG: dict[str, Any] = {
     },
     "validated_text_rules": [
         {"field": "课程目标概述", "titles": ["课程目标", "教学目标"], "keywords": ["思政", "能力", "知识", "价值", "育人", "责任", "使命", "目标"], "min_len": 8, "warning_section": "course_goal", "warning_field": "课程目标概述", "meta_key": "course_goal_text_fallback"},
+        {"field": "教学内容概述", "titles": ["教学内容", "课程内容"], "keywords": ["学时", "知识点", "主题", "内容", "章节", "总学时", "合计"], "min_len": 10, "warning_section": "jxnr", "warning_field": "教学内容概述", "meta_key": "teaching_content_text_fallback"},
+        {"field": "课程安排概述", "titles": ["教学安排", "课程安排", "授课安排", "教学进度"], "keywords": ["周次", "授课内容", "授课方式", "思政", "教学方法", "安排"], "min_len": 10, "warning_section": "jxap", "warning_field": "课程安排概述", "meta_key": "course_schedule_text_fallback"},
         {"field": "考核方式说明", "titles": ["考核方式", "课程考核", "成绩评定", "考核与评价", "评价方式"], "keywords": ["考试", "考核", "成绩", "平时", "期末", "闭卷", "开卷", "论文", "分值", "占比", "总计"], "min_len": 10, "warning_section": "assessment_rows", "warning_field": "考核方式说明", "meta_key": "assessment_text_fallback"},
         {"field": "课程要求", "titles": ["课程要求", "学习要求", "课堂要求"], "keywords": ["作业", "阅读", "考勤", "出勤", "讨论", "预习", "提交", "课堂", "要求", "完成"], "min_len": 6, "warning_section": "course_requirements", "warning_field": "课程要求", "meta_key": "course_requirement_text_fallback"},
         {"field": "阅读材料", "titles": ["教材及阅读材料", "教材", "阅读材料", "参考书", "参考文献"], "keywords": ["教材", "阅读材料", "参考书", "参考文献", "书目", "作者", "版次"], "min_len": 6, "warning_section": "jcjydcl", "warning_field": "阅读材料", "meta_key": "reading_material_fallback"},
@@ -78,7 +80,64 @@ AUDIT_CONFIG: dict[str, Any] = {
 }
 META_CONFIG: dict[str, Any] = {"extractor_version": "pdfplumber:0.11.0+pymupdf-fusion:0.1", "unmapped_cn_fields": ["课程模块", "职称", "学历"]}
 
-PROJECT_CONFIG: dict[str, Any] = {"extraction": EXTRACTION_CONFIG, "pdf_extractor": PDF_EXTRACTOR_CONFIG, "payload": PAYLOAD_CONFIG, "course_library": COURSE_LIBRARY_CONFIG, "loader": LOADER_CONFIG, "llm": LLM_CONFIG, "audit": AUDIT_CONFIG, "meta": META_CONFIG}
+FUSION_SCORING: dict[str, Any] = {
+    "teaching_content": {
+        "required": ("序号", "主题", "知识点", "学时"),
+        "weighted": {},
+        "min_rows": 2,
+        "min_improvement": 8.0,
+    },
+    "course_schedule": {
+        "required": ("序号", "授课内容"),
+        "weighted": {
+            "授课方式": 15,
+            "思政元素的融入和预期教学成效": 25,
+        },
+        "min_rows": 3,
+        "min_improvement": 5.0,
+    },
+    "assessment_rows": {
+        "required": ("考试形式", "占比"),
+        "weighted": {"考察内容": 10, "考察方式": 10},
+        "min_rows": 2,
+        "min_improvement": 3.0,
+    },
+    "course_requirements": {
+        "required": ("要求类型", "要求内容"),
+        "weighted": {},
+        "min_rows": 1,
+        "min_improvement": 8.0,
+    },
+}
+
+WARNING_SEVERITY: dict[str, str] = {
+    "missing_field": "error",
+    "empty_section": "error",
+    "overview_used_instead_of_table": "info",
+    "validated_text_fallback_used": "info",
+    "continued_table_without_header": "info",
+    "alternative_candidate_selected": "info",
+    "unknown_columns": "warn",
+    "missing_required_columns": "warn",
+    "missing_teaching_method": "warn",
+    "text_row_low_confidence": "warn",
+    "suspiciously_few_rows": "warn",
+    "sanitized_control_chars": "info",
+    "pymupdf_extract_failed": "warn",
+}
+
+PROJECT_CONFIG: dict[str, Any] = {
+    "extraction": EXTRACTION_CONFIG,
+    "pdf_extractor": PDF_EXTRACTOR_CONFIG,
+    "payload": PAYLOAD_CONFIG,
+    "course_library": COURSE_LIBRARY_CONFIG,
+    "loader": LOADER_CONFIG,
+    "llm": LLM_CONFIG,
+    "audit": AUDIT_CONFIG,
+    "meta": META_CONFIG,
+    "fusion_scoring": FUSION_SCORING,
+    "warning_severity": WARNING_SEVERITY,
+}
 
 
 @lru_cache(maxsize=1)

@@ -4,6 +4,8 @@ import re
 from copy import deepcopy
 from typing import Any
 
+from config import load_project_config
+
 
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
@@ -32,6 +34,22 @@ FIELD_LABELS = {
     },
 }
 
+OVERVIEW_KEYS = {
+    "jxnr": ("nrgs",),
+    "jxap": ("apgs",),
+    "khfsb": ("khgs",),
+    "kcmb": ("mbgs",),
+}
+
+
+def _default_severity(reason: str) -> str:
+    mapping = load_project_config().get("warning_severity", {})
+    if isinstance(mapping, dict):
+        value = mapping.get(reason)
+        if value:
+            return str(value)
+    return "error"
+
 
 def _warning(
     *,
@@ -41,21 +59,44 @@ def _warning(
     field: str = "",
     label: str = "",
     detail: str = "",
-) -> dict[str, str]:
-    warning = {
+    severity: str = "",
+) -> dict[str, Any]:
+    warning: dict[str, Any] = {
         "section": section,
         "field": field,
         "label": label,
         "reason": reason,
         "path": path,
+        "severity": severity or _default_severity(reason),
     }
     if detail:
         warning["detail"] = detail
     return warning
 
 
-def clean_for_jsonb(value: Any, path: str = "") -> tuple[Any, list[dict[str, str]]]:
-    warnings: list[dict[str, str]] = []
+def _has_overview_substitute(payload: dict[str, Any], section: str) -> bool:
+    block = payload.get(section) or {}
+    if not isinstance(block, dict):
+        return False
+    for key in OVERVIEW_KEYS.get(section, ()):
+        value = block.get(key)
+        if isinstance(value, str) and value.strip():
+            return True
+    return False
+
+
+def normalize_warning_severities(warnings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for item in warnings:
+        warning = dict(item)
+        if not warning.get("severity"):
+            warning["severity"] = _default_severity(str(warning.get("reason") or ""))
+        normalized.append(warning)
+    return normalized
+
+
+def clean_for_jsonb(value: Any, path: str = "") -> tuple[Any, list[dict[str, Any]]]:
+    warnings: list[dict[str, Any]] = []
     if isinstance(value, dict):
         cleaned: dict[Any, Any] = {}
         for key, item in value.items():
@@ -85,6 +126,7 @@ def clean_for_jsonb(value: Any, path: str = "") -> tuple[Any, list[dict[str, str
                     reason="sanitized_control_chars",
                     path=path,
                     detail="Removed control characters before JSONB insertion.",
+                    severity="info",
                 )
             )
         return cleaned, warnings
@@ -103,12 +145,13 @@ def _is_empty(value: Any) -> bool:
 
 
 def _append_missing_field(
-    warnings: list[dict[str, str]],
+    warnings: list[dict[str, Any]],
     *,
     section: str,
     field: str,
     label: str,
     path: str,
+    severity: str = "error",
 ) -> None:
     warnings.append(
         _warning(
@@ -117,30 +160,46 @@ def _append_missing_field(
             label=label,
             reason="missing_field",
             path=path,
+            severity=severity,
         )
     )
 
 
-def build_completeness_warnings(payload: dict[str, Any]) -> list[dict[str, str]]:
-    warnings: list[dict[str, str]] = []
+def build_completeness_warnings(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    warnings: list[dict[str, Any]] = []
 
     for section, fields in FIELD_LABELS.items():
         block = payload.get(section) or {}
         for field, label in fields.items():
             value = block.get(field) if isinstance(block, dict) else None
-            if _is_empty(value):
-                reason = "empty_section" if field == "tm" else "missing_field"
+            if not _is_empty(value):
+                continue
+            if field == "tm" and _has_overview_substitute(payload, section):
                 warnings.append(
                     _warning(
                         section=section,
                         field=field,
                         label=label,
-                        reason=reason,
+                        reason="overview_used_instead_of_table",
                         path=f"payload.{section}.{field}",
+                        severity="info",
                     )
                 )
+                continue
+            reason = "empty_section" if field == "tm" else "missing_field"
+            warnings.append(
+                _warning(
+                    section=section,
+                    field=field,
+                    label=label,
+                    reason=reason,
+                    path=f"payload.{section}.{field}",
+                )
+            )
 
+    jxnr_overview = _has_overview_substitute(payload, "jxnr")
     for index, item in enumerate(((payload.get("jxnr") or {}).get("tm") or [])):
+        row_severity = "warn" if jxnr_overview else "error"
         for field, label in (("xh", "序号"), ("zt", "主题"), ("zsd", "知识点"), ("xs", "学时")):
             if _is_empty(item.get(field)):
                 _append_missing_field(
@@ -149,9 +208,12 @@ def build_completeness_warnings(payload: dict[str, Any]) -> list[dict[str, str]]
                     field=field,
                     label=label,
                     path=f"payload.jxnr.tm[{index}].{field}",
+                    severity=row_severity,
                 )
 
+    jxap_overview = _has_overview_substitute(payload, "jxap")
     for index, item in enumerate(((payload.get("jxap") or {}).get("tm") or [])):
+        row_severity = "warn" if jxap_overview else "error"
         for field, label in (
             ("zs", "课程/周次"),
             ("sknr", "授课内容"),
@@ -165,9 +227,12 @@ def build_completeness_warnings(payload: dict[str, Any]) -> list[dict[str, str]]
                     field=field,
                     label=label,
                     path=f"payload.jxap.tm[{index}].{field}",
+                    severity=row_severity,
                 )
 
+    khfsb_overview = _has_overview_substitute(payload, "khfsb")
     for index, item in enumerate(((payload.get("khfsb") or {}).get("tm") or [])):
+        row_severity = "warn" if khfsb_overview else "error"
         for field, label in (("ksxs", "考试形式"), ("kcnr", "考察内容"), ("kcfs", "考察方式"), ("zb", "占比")):
             if _is_empty(item.get(field)):
                 _append_missing_field(
@@ -176,6 +241,7 @@ def build_completeness_warnings(payload: dict[str, Any]) -> list[dict[str, str]]
                     field=field,
                     label=label,
                     path=f"payload.khfsb.tm[{index}].{field}",
+                    severity=row_severity,
                 )
 
     kcyqb = payload.get("kcyqb") or {}
@@ -208,5 +274,5 @@ def prepare_payload_and_meta_for_insert(
 
     existing_warnings.extend(payload_warnings)
     existing_warnings.extend(meta_warnings)
-    meta["extraction_warnings"] = existing_warnings
+    meta["extraction_warnings"] = normalize_warning_severities(existing_warnings)
     return payload, meta

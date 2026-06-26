@@ -3,9 +3,10 @@
 from pathlib import Path
 from typing import Any
 
-from config import load_extraction_config
+from config import load_extraction_config, load_project_config
 from syllabus_auditor.core.extractors.fusion import (
     ExtractionCandidate,
+    apply_fusion_scoring,
     choose_candidate,
     make_row_candidate,
     section_summary,
@@ -29,39 +30,47 @@ def _configured_titles(section_key: str) -> tuple[str, ...]:
     return tuple(str(item) for item in titles if str(item).strip())
 
 
+def _fusion_scoring(section_key: str) -> dict[str, Any]:
+    cfg = load_project_config().get("fusion_scoring", {})
+    if not isinstance(cfg, dict):
+        return {}
+    value = cfg.get(section_key, {})
+    return value if isinstance(value, dict) else {}
+
+
 def _append_warning(raw: ExtractionRaw, section: str, reason: str, **extra: Any) -> None:
-    warning = {"section": section, "reason": reason}
+    severity = _default_warning_severity(reason)
+    warning = {"section": section, "reason": reason, "severity": severity}
     warning.update(extra)
     raw.extraction_warnings.append(warning)
 
 
+def _default_warning_severity(reason: str) -> str:
+    mapping = load_project_config().get("warning_severity", {})
+    if isinstance(mapping, dict) and reason in mapping:
+        return str(mapping[reason])
+    return "error"
+
+
 def _current_candidates(raw: ExtractionRaw) -> dict[str, ExtractionCandidate]:
-    return {
-        "teaching_content": make_row_candidate(
-            "teaching_content",
-            "pdfplumber_table",
-            raw.teaching_content,
-            ("序号", "主题", "知识点", "学时"),
-        ),
-        "course_schedule": make_row_candidate(
-            "course_schedule",
-            "pdfplumber_table",
-            raw.course_schedule,
-            ("序号", "授课内容"),
-        ),
-        "assessment_rows": make_row_candidate(
-            "assessment_rows",
-            "pdfplumber_table",
-            raw.assessment_rows,
-            ("考试形式", "占比"),
-        ),
-        "course_requirements": make_row_candidate(
-            "course_requirements",
-            "pdfplumber_table",
-            raw.course_requirements,
-            (),
-        ),
+    sections = {
+        "teaching_content": (raw.teaching_content, ("序号", "主题", "知识点", "学时")),
+        "course_schedule": (raw.course_schedule, ("序号", "授课内容")),
+        "assessment_rows": (raw.assessment_rows, ("考试形式", "占比")),
+        "course_requirements": (raw.course_requirements, ()),
     }
+    candidates: dict[str, ExtractionCandidate] = {}
+    for section_key, (rows, required_fields) in sections.items():
+        scoring = _fusion_scoring(section_key)
+        candidate = make_row_candidate(
+            section_key,
+            "pdfplumber_table",
+            rows,
+            required_fields,
+            scoring_config=scoring or None,
+        )
+        candidates[section_key] = apply_fusion_scoring(candidate, scoring, required_fields=required_fields)
+    return candidates
 
 
 def _candidate_sources(raw: ExtractionRaw, pdf_path: Path) -> tuple[list[dict[str, Any]], str]:
@@ -93,8 +102,18 @@ def _select_rows(
     current: ExtractionCandidate,
     candidates: list[ExtractionCandidate],
 ) -> ExtractionCandidate:
-    selected = choose_candidate(current, candidates)
-    all_candidates = [current, *candidates]
+    scoring = _fusion_scoring(section_key)
+    required = tuple(scoring.get("required") or ())
+    min_improvement = float(scoring.get("min_improvement", 8.0))
+
+    scored_current = apply_fusion_scoring(current, scoring, required_fields=required)
+    scored_candidates = [
+        apply_fusion_scoring(candidate, scoring, required_fields=required)
+        for candidate in candidates
+    ]
+
+    selected = choose_candidate(scored_current, scored_candidates, min_improvement=min_improvement)
+    all_candidates = [scored_current, *scored_candidates]
     raw.section_extraction[section_key] = section_summary(selected, all_candidates)
     if selected.source != current.source:
         _append_warning(
@@ -105,7 +124,10 @@ def _select_rows(
             score=round(selected.score, 2),
         )
     for warning in selected.warnings:
-        raw.extraction_warnings.append({"section": section_key, **warning})
+        item = {"section": section_key, **warning}
+        if "severity" not in item:
+            item["severity"] = _default_warning_severity(str(warning.get("reason") or ""))
+        raw.extraction_warnings.append(item)
     return selected
 
 

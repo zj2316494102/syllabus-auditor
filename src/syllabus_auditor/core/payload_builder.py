@@ -16,7 +16,6 @@ JCXX_FIELD_MAP = dict(_payload_config().get("jcxx_field_map") or {})
 CONTENT_ITEM_MAP = dict(_payload_config().get("content_item_map") or {})
 SCHEDULE_ITEM_MAP = dict(_payload_config().get("schedule_item_map") or {})
 ASSESSMENT_ITEM_MAP = dict(_payload_config().get("assessment_item_map") or {})
-REQUIREMENT_ITEM_MAP = dict(_payload_config().get("requirement_item_map") or {})
 EMPTY_MARKERS = {str(item).lower() for item in (_payload_config().get("empty_markers") or [])}
 TOTAL_HOURS_PATTERNS = [str(item) for item in (_payload_config().get("total_hours_patterns") or [])]
 COURSE_CODE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$")
@@ -63,6 +62,33 @@ def _map_row(row: dict[str, Any], mapping: dict[str, str]) -> dict[str, Any]:
     return mapped
 
 
+_SZ_CN = "思政元素的融入和预期教学成效"
+_SZ_PY = "szyqjxx"
+_SZ_KZZD_KEYS = ("思政", "预期教学成效", "课程思政", "思政元素", "思政融入")
+
+
+def _promote_schedule_sz_cn(row: dict[str, Any]) -> dict[str, Any]:
+    if _clean_value(row.get(_SZ_CN)):
+        return row
+
+    kzzd = row.get("kzzd")
+    if isinstance(kzzd, dict):
+        for label, value in kzzd.items():
+            if any(key in str(label) for key in _SZ_KZZD_KEYS):
+                cleaned = _clean_value(value)
+                if cleaned:
+                    row[_SZ_CN] = cleaned
+                    return row
+
+    sknr = str(row.get("授课内容") or "")
+    if "思政" in sknr:
+        idx = sknr.find("思政")
+        row[_SZ_CN] = _clean_value(sknr[idx:])
+        row["授课内容"] = _clean_value(sknr[:idx])
+
+    return row
+
+
 def _extract_total_hours(full_text: str, teaching_content: list[dict[str, Any]]) -> str:
     for pattern in TOTAL_HOURS_PATTERNS:
         match = re.search(pattern, full_text)
@@ -105,37 +131,32 @@ def build_payload(raw: ExtractionRaw) -> dict[str, Any]:
     content_items = [_map_row(row, CONTENT_ITEM_MAP) for row in raw.teaching_content]
     content_items = [item for item in content_items if item]
     zongxs = _extract_total_hours(raw.full_text, raw.teaching_content)
-    if not zongxs:
-        zongxs = jcxx.get("zongxs", "")
 
     if content_items:
         jxnr: dict[str, Any] = {"tm": content_items, "zongxs": zongxs, "nrgs": ""}
     else:
         jxnr = {"tm": [], "zongxs": zongxs, "nrgs": _clean_value(cn.get("教学内容概述", ""))}
 
-    schedule_items = [_map_row(row, SCHEDULE_ITEM_MAP) for row in raw.course_schedule]
+    schedule_items = [
+        _map_row(_promote_schedule_sz_cn(dict(row)), SCHEDULE_ITEM_MAP)
+        for row in raw.course_schedule
+    ]
     schedule_items = [item for item in schedule_items if item]
     if schedule_items:
         jxap: dict[str, Any] = {"tm": schedule_items, "apgs": ""}
     else:
         jxap = {"tm": [], "apgs": _clean_value(cn.get("课程安排概述", ""))}
 
-    assessment_items = [_map_row(row, ASSESSMENT_ITEM_MAP) for row in raw.assessment_rows]
-    assessment_items = [item for item in assessment_items if item]
-    khgs = _clean_value(cn.get("考核方式说明", ""))
-    if assessment_items:
+    # khfsb 互斥：parse 阶段已判别 table→tm / text→khgs（见 apply_khfsb_source）
+    if raw.assessment_rows:
+        assessment_items = [_map_row(row, ASSESSMENT_ITEM_MAP) for row in raw.assessment_rows]
+        assessment_items = [item for item in assessment_items if item]
         khfsb: dict[str, Any] = {"tm": assessment_items, "khgs": ""}
     else:
-        khfsb = {"tm": [], "khgs": khgs}
+        khfsb = {"tm": [], "khgs": _clean_value(cn.get("考核方式说明", ""))}
 
-    requirement_items = [_map_row(row, REQUIREMENT_ITEM_MAP) for row in raw.course_requirements]
-    requirement_items = [item for item in requirement_items if item]
     course_requirement_text = _clean_value(cn.get("课程要求", ""))
-    if requirement_items:
-        kcyqb: dict[str, Any] = {"tm": requirement_items, "yqgs": "", "kzzd": []}
-        course_requirement_text = ""
-    else:
-        kcyqb = {"tm": [], "yqgs": "", "kzzd": []}
+    kcyqb: dict[str, Any] = {"tm": [], "yqgs": "", "kzzd": []}
 
     return {
         "jcxx": jcxx,
