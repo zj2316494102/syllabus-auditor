@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "syllabus-auditor"
+version = "0.1.0"
+description = "课程方案抽取与批处理审核（CLI + PostgreSQL）"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "typer>=0.12.3",
+  "pydantic>=2.8.0",
+  "python-dotenv>=1.0.1",
+  "rich>=13.7.1",
+  "psycopg[binary]>=3.2.0",
+  "pdfplumber>=0.11.0",
+  "PyMuPDF>=1.24.0",
+  "pandas>=2.0.0",
+  "openpyxl>=3.1.0",
+  "xlrd>=2.0.1",
+  "openai>=1.40.0",
+  "beautifulsoup4>=4.12.0",
+  "pyyaml>=6.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+  "ruff>=0.6.0",
+]
+
+[project.scripts]
+syllabus-auditor = "syllabus_auditor.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit"]
+pythonpath = ["src", "."]
+markers = [
+    "integration: 需要 DATABASE_URL 与本地 data_pdf/data_md",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"

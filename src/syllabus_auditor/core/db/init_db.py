@@ -1,4 +1,5 @@
-"""Initialize PostgreSQL schema for syllabus-auditor."""
+"""执行 schema.sql 初始化 PostgreSQL 表结构。"""
+
 
 from __future__ import annotations
 

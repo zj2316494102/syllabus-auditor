@@ -1,16 +1,29 @@
-﻿from __future__ import annotations
+"""维度：信息要素完整、符合模板、是否有中英文简介（xxyzwzfhmb）。"""
+
+from __future__ import annotations
 
 import re
 from typing import Any
 
+from syllabus_auditor.shared.config import load_project_config
 from syllabus_auditor.core.audit import FAIL, PASS, AuditSubject, FieldFinding, SectionFinding
-from config import load_project_config
-
+from syllabus_auditor.utils import (
+    as_dict,
+    as_list,
+    dedupe,
+    is_empty,
+    json_value,
+    label_value,
+    meta_text_sources,
+    remove_section_titles,
+    section_snippets,
+)
 
 DIMENSION = "xxyzwzfhmb"
 DIMENSION_LABEL = "信息要素完整、符合模板、是否有中英文简介"
 MBXXYZWZ = "mbxxyzwz"
 ZYWJJ = "zywjj"
+
 
 def _template_config() -> dict[str, Any]:
     audit_config = load_project_config().get("audit", {})
@@ -41,6 +54,7 @@ SECTION_HINTS = {
     if isinstance(value, list)
 }
 
+
 def audit_xxyzwzfhmb(subject: AuditSubject) -> tuple[SectionFinding, list[FieldFinding]]:
     payload = subject.payload or {}
     meta = subject.meta or {}
@@ -54,25 +68,16 @@ def audit_xxyzwzfhmb(subject: AuditSubject) -> tuple[SectionFinding, list[FieldF
     field_findings.append(_course_requirement_finding(payload, meta))
 
     failed = [item for item in field_findings if item.status == FAIL]
-    reasons = _dedupe([item.reason for item in failed if item.reason])
+    reasons = dedupe([item.reason for item in failed if item.reason])
     status = FAIL if failed else PASS
     result = "否" if failed else "是"
 
-    intro_failures = [
-        item
-        for item in field_findings
-        if item.status == FAIL
-        and item.path in {"payload.kczwjj", "payload.kcywjj"}
-    ]
+    intro_failures = [item for item in field_findings if item.status == FAIL and item.path in {"payload.kczwjj", "payload.kcywjj"}]
     checks = {
-        MBXXYZWZ: {
-            "result": result,
-            "reason": "；".join(reasons),
-            "fail_count": len(failed),
-        },
+        MBXXYZWZ: {"result": result, "reason": "；".join(reasons), "fail_count": len(failed)},
         ZYWJJ: {
             "result": "否" if intro_failures else "是",
-            "reason": "；".join(_dedupe([item.reason for item in intro_failures])), 
+            "reason": "；".join(dedupe([item.reason for item in intro_failures])),
             "fail_count": len(intro_failures),
         },
     }
@@ -88,12 +93,7 @@ def audit_xxyzwzfhmb(subject: AuditSubject) -> tuple[SectionFinding, list[FieldF
         message=result,
         evidence=evidence,
         suggestion="按字段级原因补齐模板字段、章节或表格列。" if failed else "",
-        details={
-            "label": DIMENSION_LABEL,
-            "result": result,
-            "reasons": reasons,
-            "checks": checks,
-        },
+        details={"label": DIMENSION_LABEL, "result": result, "reasons": reasons, "checks": checks},
         pdfs="rule",
     )
     summary_fields = [
@@ -104,13 +104,13 @@ def audit_xxyzwzfhmb(subject: AuditSubject) -> tuple[SectionFinding, list[FieldF
 
 
 def _basic_info_findings(payload: dict[str, Any], meta: dict[str, Any]) -> list[FieldFinding]:
-    jcxx = _as_dict(payload.get("jcxx"))
+    jcxx = as_dict(payload.get("jcxx"))
     findings: list[FieldFinding] = []
     for field_name, label in NORMAL_BASIC_FIELDS:
         path = f"payload.jcxx.{field_name}"
         findings.append(
             _field_presence(
-                section="jcxx",
+                section="jcxx_template",
                 field_name=field_name,
                 path=path,
                 label=label,
@@ -126,12 +126,12 @@ def _basic_info_findings(payload: dict[str, Any], meta: dict[str, Any]) -> list[
         if field_name in jcxx:
             findings.append(
                 FieldFinding(
-                    section="jcxx",
+                    section="jcxx_template",
                     field=field_name,
                     path=path,
                     status=PASS,
                     message=f"{label}字段存在，允许为空",
-                    actual=_json_value(jcxx.get(field_name)),
+                    actual=json_value(jcxx.get(field_name)),
                 )
             )
             continue
@@ -139,11 +139,11 @@ def _basic_info_findings(payload: dict[str, Any], meta: dict[str, Any]) -> list[
         if fallback:
             findings.append(
                 FieldFinding(
-                    section="jcxx",
+                    section="jcxx_template",
                     field=field_name,
                     path=path,
                     status=PASS,
-                    message=f"{label}字段在 meta 中存在，允许为空",
+                    message=f"{label}字段在原文辅助信息中存在，允许为空",
                     actual="",
                     evidence=fallback,
                 )
@@ -151,7 +151,7 @@ def _basic_info_findings(payload: dict[str, Any], meta: dict[str, Any]) -> list[
             continue
         findings.append(
             FieldFinding(
-                section="jcxx",
+                section="jcxx_template",
                 field=field_name,
                 path=path,
                 status=FAIL,
@@ -165,46 +165,42 @@ def _basic_info_findings(payload: dict[str, Any], meta: dict[str, Any]) -> list[
 
 
 def _top_level_findings(payload: dict[str, Any], meta: dict[str, Any]) -> list[FieldFinding]:
-    findings = []
-    for field_name, label in TOP_LEVEL_FIELDS:
-        findings.append(
-            _field_presence(
-                section="payload",
-                field_name=field_name,
-                path=f"payload.{field_name}",
-                label=label,
-                value=payload.get(field_name),
-                meta=meta,
-                section_key=field_name,
-                labels=(label,),
-                require_value=True,
-            )
+    return [
+        _field_presence(
+            section="payload",
+            field_name=field_name,
+            path=f"payload.{field_name}",
+            label=label,
+            value=payload.get(field_name),
+            meta=meta,
+            section_key=field_name,
+            labels=(label,),
+            require_value=True,
         )
-    return findings
+        for field_name, label in TOP_LEVEL_FIELDS
+    ]
 
 
 def _course_goal_findings(payload: dict[str, Any], meta: dict[str, Any]) -> list[FieldFinding]:
-    kcmb = _as_dict(payload.get("kcmb"))
-    findings = []
-    for field_name, label in COURSE_GOAL_FIELDS:
-        findings.append(
-            _field_presence(
-                section="kcmb",
-                field_name=field_name,
-                path=f"payload.kcmb.{field_name}",
-                label=label,
-                value=kcmb.get(field_name),
-                meta=meta,
-                section_key="kcmb",
-                labels=(label,),
-                require_value=True,
-            )
+    kcmb = as_dict(payload.get("kcmb"))
+    return [
+        _field_presence(
+            section="kcmb",
+            field_name=field_name,
+            path=f"payload.kcmb.{field_name}",
+            label=label,
+            value=kcmb.get(field_name),
+            meta=meta,
+            section_key="kcmb",
+            labels=(label,),
+            require_value=True,
         )
-    return findings
+        for field_name, label in COURSE_GOAL_FIELDS
+    ]
 
 
 def _teaching_content_findings(payload: dict[str, Any], meta: dict[str, Any]) -> list[FieldFinding]:
-    jxnr = _as_dict(payload.get("jxnr"))
+    jxnr = as_dict(payload.get("jxnr"))
     findings = [
         _field_presence(
             section="jxnr",
@@ -218,7 +214,7 @@ def _teaching_content_findings(payload: dict[str, Any], meta: dict[str, Any]) ->
             require_value=True,
         )
     ]
-    rows = _as_list(jxnr.get("tm"))
+    rows = as_list(jxnr.get("tm"))
     if not rows:
         fallback = _find_meta_table(meta, "jxnr", tuple(label for _, label in JXNR_ROW_FIELDS), require_rows=True)
         if fallback:
@@ -228,7 +224,7 @@ def _teaching_content_findings(payload: dict[str, Any], meta: dict[str, Any]) ->
                     field="tm",
                     path="payload.jxnr.tm",
                     status=PASS,
-                    message="教学内容表在 meta 中存在。",
+                    message="教学内容表在原文辅助信息中存在。",
                     evidence=fallback,
                 )
             )
@@ -247,7 +243,7 @@ def _teaching_content_findings(payload: dict[str, Any], meta: dict[str, Any]) ->
         return findings
 
     for index, row in enumerate(rows):
-        row_dict = _as_dict(row)
+        row_dict = as_dict(row)
         for field_name, label in JXNR_ROW_FIELDS:
             findings.append(
                 _row_presence(
@@ -263,8 +259,8 @@ def _teaching_content_findings(payload: dict[str, Any], meta: dict[str, Any]) ->
 
 
 def _teaching_arrangement_findings(payload: dict[str, Any], meta: dict[str, Any]) -> list[FieldFinding]:
-    jxap = _as_dict(payload.get("jxap"))
-    rows = _as_list(jxap.get("tm"))
+    jxap = as_dict(payload.get("jxap"))
+    rows = as_list(jxap.get("tm"))
     findings: list[FieldFinding] = []
     if not rows:
         fallback = _find_meta_table(meta, "jxap", tuple(label for _, label in JXAP_ROW_FIELDS), require_rows=True)
@@ -275,7 +271,7 @@ def _teaching_arrangement_findings(payload: dict[str, Any], meta: dict[str, Any]
                     field="tm",
                     path="payload.jxap.tm",
                     status=PASS,
-                    message="教学安排表在 meta 中存在。",
+                    message="教学安排表在原文辅助信息中存在。",
                     evidence=fallback,
                 )
             )
@@ -294,7 +290,7 @@ def _teaching_arrangement_findings(payload: dict[str, Any], meta: dict[str, Any]
         return findings
 
     for index, row in enumerate(rows):
-        row_dict = _as_dict(row)
+        row_dict = as_dict(row)
         for field_name, label in JXAP_ROW_FIELDS:
             findings.append(
                 _row_presence(
@@ -310,20 +306,14 @@ def _teaching_arrangement_findings(payload: dict[str, Any], meta: dict[str, Any]
 
 
 def _course_requirement_finding(payload: dict[str, Any], meta: dict[str, Any]) -> FieldFinding:
-    kcyqb = _as_dict(payload.get("kcyqb"))
-    has_content = not _is_empty(payload.get("kcyq")) or not _is_empty(kcyqb.get("tm")) or not _is_empty(kcyqb.get("yqgs"))
-    if has_content:
+    if not is_empty(payload.get("kcyq")):
         return FieldFinding(
             section="kcyq",
             field="content",
             path="payload.kcyq",
             status=PASS,
             message="课程要求已填写",
-            actual={
-                "has_text": not _is_empty(payload.get("kcyq")),
-                "has_table": not _is_empty(kcyqb.get("tm")),
-                "has_summary": not _is_empty(kcyqb.get("yqgs")),
-            },
+            actual={"has_text": True},
         )
     fallback = _find_meta_section_content(meta, "kcyq")
     if fallback:
@@ -332,7 +322,7 @@ def _course_requirement_finding(payload: dict[str, Any], meta: dict[str, Any]) -
             field="content",
             path="payload.kcyq",
             status=PASS,
-            message="课程要求在 meta 中存在。",
+            message="课程要求在原文辅助信息中存在。",
             evidence=fallback,
         )
     return FieldFinding(
@@ -343,7 +333,7 @@ def _course_requirement_finding(payload: dict[str, Any], meta: dict[str, Any]) -
         reason="课程要求为空",
         message="课程要求为空",
         actual="",
-        suggestion="补齐课程要求文本或结构化课程要求表。",
+        suggestion="补齐课程要求文本。",
     )
 
 
@@ -359,14 +349,14 @@ def _field_presence(
     labels: tuple[str, ...],
     require_value: bool,
 ) -> FieldFinding:
-    if not _is_empty(value):
+    if not is_empty(value):
         return FieldFinding(
             section=section,
             field=field_name,
             path=path,
             status=PASS,
             message=f"{label}已填写",
-            actual=_json_value(value),
+            actual=json_value(value),
         )
     fallback = _find_meta_label(meta, section_key, labels, require_value=require_value)
     if fallback:
@@ -375,15 +365,14 @@ def _field_presence(
             field=field_name,
             path=path,
             status=PASS,
-            message=f"{label}在 meta 中存在",
-            actual=_json_value(value),
+            message=f"{label}在原文辅助信息中存在",
+            actual=json_value(value),
             evidence=fallback,
         )
     title_only = _find_meta_section_title(meta, section_key)
-    evidence = title_only or {}
     reason = f"{label}为空"
     if title_only:
-        reason = f"{label}为空，meta 中仅发现章节标题，未发现有效内容，需人工复核"
+        reason = f"{label}为空；原文辅助信息中只有章节标题，没有该字段的填写内容"
     return FieldFinding(
         section=section,
         field=field_name,
@@ -391,8 +380,8 @@ def _field_presence(
         status=FAIL,
         reason=reason,
         message=reason,
-        actual=_json_value(value),
-        evidence=evidence,
+        actual=json_value(value),
+        evidence=title_only or {},
         suggestion=f"检查 PDF 中{label}是否填写，或调整抽取模板。",
     )
 
@@ -406,14 +395,14 @@ def _row_presence(
     value: Any,
     row_index: int,
 ) -> FieldFinding:
-    if not _is_empty(value):
+    if not is_empty(value):
         return FieldFinding(
             section=section,
             field=field_name,
             path=path,
             status=PASS,
             message=f"{label}已填写",
-            actual=_json_value(value),
+            actual=json_value(value),
         )
     reason = f"{section}第 {row_index + 1} 行{label}为空"
     return FieldFinding(
@@ -423,7 +412,7 @@ def _row_presence(
         status=FAIL,
         reason=reason,
         message=reason,
-        actual=_json_value(value),
+        actual=json_value(value),
         suggestion=f"补齐{section}表第 {row_index + 1} 行的{label}。",
     )
 
@@ -450,10 +439,10 @@ def _find_meta_label(
     *,
     require_value: bool,
 ) -> dict[str, Any]:
-    for source in _meta_text_sources(meta):
-        for snippet in _section_snippets(source["text"], SECTION_HINTS.get(section_key, ())):
+    for source in meta_text_sources(meta):
+        for snippet in section_snippets(source["text"], SECTION_HINTS.get(section_key, ())):
             for label in labels:
-                value = _label_value(snippet["snippet"], label)
+                value = label_value(snippet["snippet"], label)
                 if value is None:
                     continue
                 if require_value and not value.strip():
@@ -476,8 +465,8 @@ def _find_meta_table(
     *,
     require_rows: bool,
 ) -> dict[str, Any]:
-    for source in _meta_text_sources(meta):
-        for snippet in _section_snippets(source["text"], SECTION_HINTS.get(section_key, ())):
+    for source in meta_text_sources(meta):
+        for snippet in section_snippets(source["text"], SECTION_HINTS.get(section_key, ())):
             text = snippet["snippet"]
             found_labels = [label for label in labels if label in text]
             if len(found_labels) < max(2, min(len(labels), 3)):
@@ -497,9 +486,9 @@ def _find_meta_table(
 
 
 def _find_meta_section_content(meta: dict[str, Any], section_key: str) -> dict[str, Any]:
-    for source in _meta_text_sources(meta):
-        for snippet in _section_snippets(source["text"], SECTION_HINTS.get(section_key, ())):
-            body = _remove_section_titles(snippet["snippet"], SECTION_HINTS.get(section_key, ()))
+    for source in meta_text_sources(meta):
+        for snippet in section_snippets(source["text"], SECTION_HINTS.get(section_key, ())):
+            body = remove_section_titles(snippet["snippet"], SECTION_HINTS.get(section_key, ()))
             if len(body.strip()) < 8:
                 continue
             return {
@@ -513,7 +502,7 @@ def _find_meta_section_content(meta: dict[str, Any], section_key: str) -> dict[s
 
 
 def _find_meta_section_title(meta: dict[str, Any], section_key: str) -> dict[str, Any]:
-    for source in _meta_text_sources(meta):
+    for source in meta_text_sources(meta):
         for hint in SECTION_HINTS.get(section_key, ()):
             if hint in source["text"]:
                 return {
@@ -524,88 +513,4 @@ def _find_meta_section_title(meta: dict[str, Any], section_key: str) -> dict[str
                     "reason": "meta_title_only",
                 }
     return {}
-
-
-def _meta_text_sources(meta: dict[str, Any]) -> list[dict[str, str]]:
-    sources: list[dict[str, str]] = []
-    full_text = _exact_value(meta.get("full_text"))
-    if full_text:
-        sources.append({"source_path": "meta.full_text", "text": full_text})
-    for index, page in enumerate(_as_list(meta.get("raw_pages"))):
-        if isinstance(page, dict):
-            text = _exact_value(page.get("text") or page.get("content") or page.get("raw_text"))
-        else:
-            text = _exact_value(page)
-        if text:
-            sources.append({"source_path": f"meta.raw_pages[{index}]", "text": text})
-    for index, segment in enumerate(_as_list(meta.get("unmapped_segments"))):
-        if isinstance(segment, dict):
-            text = _exact_value(segment.get("text") or segment.get("content") or segment.get("snippet"))
-        else:
-            text = _exact_value(segment)
-        if text:
-            sources.append({"source_path": f"meta.unmapped_segments[{index}]", "text": text})
-    return sources
-
-
-def _section_snippets(text: str, hints: tuple[str, ...], *, window: int = 800) -> list[dict[str, str]]:
-    result = []
-    for hint in hints:
-        for match in re.finditer(re.escape(hint), text):
-            start = max(0, match.start() - 80)
-            end = min(len(text), match.end() + window)
-            result.append({"section_hint": hint, "snippet": text[start:end]})
-    return result
-
-
-def _label_value(snippet: str, label: str) -> str | None:
-    pattern = rf"{re.escape(label)}\s*[:：]?\s*([^\n\r；。]*)"
-    match = re.search(pattern, snippet)
-    if not match:
-        return None
-    return match.group(1).strip()
-
-
-def _remove_section_titles(text: str, hints: tuple[str, ...]) -> str:
-    result = text
-    for hint in hints:
-        result = result.replace(hint, "")
-    return result
-
-
-def _dedupe(values: list[str]) -> list[str]:
-    seen: set[str] = set()
-    result = []
-    for value in values:
-        if value and value not in seen:
-            seen.add(value)
-            result.append(value)
-    return result
-
-
-def _is_empty(value: Any) -> bool:
-    if value is None:
-        return True
-    if isinstance(value, str):
-        return not value.strip()
-    if isinstance(value, (list, dict)):
-        return not value
-    return False
-
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _as_list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
-def _json_value(value: Any) -> Any:
-    return "" if value is None else value
-
-
-def _exact_value(value: Any) -> str:
-    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(value or "")).strip()
-
 

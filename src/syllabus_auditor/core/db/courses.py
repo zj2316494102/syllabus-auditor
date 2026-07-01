@@ -1,3 +1,5 @@
+"""courses 表的 upsert 操作。"""
+
 from __future__ import annotations
 
 from typing import Any

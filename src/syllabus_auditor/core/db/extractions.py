@@ -1,3 +1,5 @@
+"""syllabus_extractions 表的读写。"""
+
 from __future__ import annotations
 
 import json

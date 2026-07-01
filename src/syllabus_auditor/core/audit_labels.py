@@ -1,6 +1,7 @@
-﻿from __future__ import annotations
+"""审核维度代码与中文标签互转。"""
 
-from config import load_project_config
+from __future__ import annotations
+from syllabus_auditor.shared.config import load_project_config
 
 
 def _labels() -> dict[str, str]:

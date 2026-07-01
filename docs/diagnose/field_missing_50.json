@@ -1,0 +1,259 @@
+{
+  "scope": "50 MinerU-success MDs",
+  "field_missing_reasons": [
+    "empty_section",
+    "missing_field"
+  ],
+  "verify_note": "核对依据为 MD 对应章节内容（与 mineru_md 抽取输入一致），非 PDF 全文关键字",
+  "mineru_md": {
+    "summary": {
+      "total_docs": 647,
+      "skipped_no_md": 0,
+      "verify_source": "mineru_md_file_section",
+      "total_field_missing_warnings": 682,
+      "reason_breakdown": {
+        "missing_field": 562,
+        "empty_section": 120
+      },
+      "compare_totals": {
+        "source_missing": 507,
+        "extract_failure": 14,
+        "uncertain": 161
+      },
+      "false_missing_rate_pct": 2.1,
+      "true_missing_rate_pct": 74.3
+    },
+    "rows": [
+      {
+        "reason": "missing_field",
+        "reason_cn": "字段为空",
+        "label": "任课教师姓名",
+        "section": "jcxx",
+        "system_count": 74,
+        "source_missing": 74,
+        "extract_failure": 0,
+        "uncertain": 0
+      },
+      {
+        "reason": "missing_field",
+        "reason_cn": "字段为空",
+        "label": "英文课程名称",
+        "section": "jcxx",
+        "system_count": 69,
+        "source_missing": 69,
+        "extract_failure": 0,
+        "uncertain": 0
+      },
+      {
+        "reason": "missing_field",
+        "reason_cn": "字段为空",
+        "label": "开课（院）系",
+        "section": "jcxx",
+        "system_count": 68,
+        "source_missing": 68,
+        "extract_failure": 0,
+        "uncertain": 0
+      },
+      {
+        "reason": "missing_field",
+        "reason_cn": "字段为空",
+        "label": "思政目标",
+        "section": "kcmb",
+        "system_count": 68,
+        "source_missing": 68,
+        "extract_failure": 0,
+        "uncertain": 0
+      },
+      {
+        "reason": "missing_field",
+        "reason_cn": "字段为空",
+        "label": "能力目标",
+        "section": "kcmb",
+        "system_count": 67,
+        "source_missing": 67,
+        "extract_failure": 0,
+        "uncertain": 0
+      },
+      {
+        "reason": "missing_field",
+        "reason_cn": "字段为空",
+        "label": "课程编号",
+        "section": "jcxx",
+        "system_count": 67,
+        "source_missing": 67,
+        "extract_failure": 0,
+        "uncertain": 0
+      },
+      {
+        "reason": "missing_field",
+        "reason_cn": "字段为空",
+        "label": "知识目标",
+        "section": "kcmb",
+        "system_count": 65,
+        "source_missing": 65,
+        "extract_failure": 0,
+        "uncertain": 0
+      },
+      {
+        "reason": "empty_section",
+        "reason_cn": "章节/表为空",
+        "label": "课程要求",
+        "section": "kcyq",
+        "system_count": 45,
+        "source_missing": 0,
+        "extract_failure": 0,
+        "uncertain": 45
+      },
+      {
+        "reason": "empty_section",
+        "reason_cn": "章节/表为空",
+        "label": "教学内容条目",
+        "section": "jxnr",
+        "system_count": 33,
+        "source_missing": 0,
+        "extract_failure": 0,
+        "uncertain": 33
+      },
+      {
+        "reason": "empty_section",
+        "reason_cn": "章节/表为空",
+        "label": "教学安排条目",
+        "section": "jxap",
+        "system_count": 32,
+        "source_missing": 0,
+        "extract_failure": 0,
+        "uncertain": 32
+      },
+      {
+        "reason": "missing_field",
+        "reason_cn": "字段为空",
+        "label": "思政元素的融入和预期教学成效",
+        "section": "jxap",
+        "system_count": 15,
+        "source_missing": 0,
+        "extract_failure": 2,
+        "uncertain": 13
+      },
+      {
+        "reason": "missing_field",
+        "reason_cn": "字段为空",
+        "label": "中文课程名称",
+        "section": "jcxx",
+        "system_count": 14,
+        "source_missing": 14,
+        "extract_failure": 0,
+        "uncertain": 0
+      },
+      {
+        "reason": "missing_field",
+        "reason_cn": "字段为空",
+        "label": "考察内容",
+        "section": "khfsb",
+        "system_count": 12,
+        "source_missing": 6,
+        "extract_failure": 1,
+        "uncertain": 5
+      },
+      {
+        "reason": "missing_field",
+        "reason_cn": "字段为空",
+        "label": "课程/周次",
+        "section": "jxap",
+        "system_count": 12,
+        "source_missing": 1,
+        "extract_failure": 2,
+        "uncertain": 9
+      },
+      {
+        "reason": "empty_section",
+        "reason_cn": "章节/表为空",
+        "label": "考核方式条目",
+        "section": "khfsb",
+        "system_count": 10,
+        "source_missing": 0,
+        "extract_failure": 0,
+        "uncertain": 10
+      },
+      {
+        "reason": "missing_field",
+        "reason_cn": "字段为空",
+        "label": "考察方式",
+        "section": "khfsb",
+        "system_count": 10,
+        "source_missing": 5,
+        "extract_failure": 0,
+        "uncertain": 5
+      },
+      {
+        "reason": "missing_field",
+        "reason_cn": "字段为空",
+        "label": "序号",
+        "section": "jxnr",
+        "system_count": 7,
+        "source_missing": 0,
+        "extract_failure": 5,
+        "uncertain": 2
+      },
+      {
+        "reason": "missing_field",
+        "reason_cn": "字段为空",
+        "label": "占比",
+        "section": "khfsb",
+        "system_count": 4,
+        "source_missing": 2,
+        "extract_failure": 0,
+        "uncertain": 2
+      },
+      {
+        "reason": "missing_field",
+        "reason_cn": "字段为空",
+        "label": "学时",
+        "section": "jxnr",
+        "system_count": 3,
+        "source_missing": 1,
+        "extract_failure": 1,
+        "uncertain": 1
+      },
+      {
+        "reason": "missing_field",
+        "reason_cn": "字段为空",
+        "label": "授课内容",
+        "section": "jxap",
+        "system_count": 3,
+        "source_missing": 0,
+        "extract_failure": 0,
+        "uncertain": 3
+      },
+      {
+        "reason": "missing_field",
+        "reason_cn": "字段为空",
+        "label": "主题",
+        "section": "jxnr",
+        "system_count": 2,
+        "source_missing": 0,
+        "extract_failure": 2,
+        "uncertain": 0
+      },
+      {
+        "reason": "missing_field",
+        "reason_cn": "字段为空",
+        "label": "授课方式",
+        "section": "jxap",
+        "system_count": 1,
+        "source_missing": 0,
+        "extract_failure": 0,
+        "uncertain": 1
+      },
+      {
+        "reason": "missing_field",
+        "reason_cn": "字段为空",
+        "label": "知识点",
+        "section": "jxnr",
+        "system_count": 1,
+        "source_missing": 0,
+        "extract_failure": 1,
+        "uncertain": 0
+      }
+    ]
+  }
+}

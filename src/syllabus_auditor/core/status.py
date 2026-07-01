@@ -1,3 +1,5 @@
+"""根据 payload 与告警判定抽取状态（success / partial / failed）。"""
+
 from __future__ import annotations
 
 from typing import Any

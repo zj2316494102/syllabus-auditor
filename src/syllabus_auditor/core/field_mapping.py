@@ -1,8 +1,8 @@
-﻿"""Excel column to courses-table column mapping."""
+"""Excel 列名到 courses 表列的映射关系。"""
 
 from __future__ import annotations
 
-from config import load_project_config
+from syllabus_auditor.shared.config import load_project_config
 
 
 def _course_library_config() -> dict:

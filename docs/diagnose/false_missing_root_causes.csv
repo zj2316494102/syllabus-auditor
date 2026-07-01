@@ -1,0 +1,11 @@
+﻿label,section,root_cause,root_cause_cn,count,samples
+"序号",jxnr,all_parsed_rows_column_empty,"已解析行但该列全部为空（列映射或单元格丢失）",4,["国际商学院-国际贸易理论与新发展格局下政策研究专题Ⅱ-陈丽丽 高超 蔡龙飞2026", "《博弈论与信息经济学》课程实施方案2026", "高微（2）课程实施方案2026"]
+"序号",jxnr,partial_rows_column_empty,"部分行该列为空",1,["习近平总书记关于党的建设的重要思想专题研究课程实施方案"]
+"主题",jxnr,partial_rows_column_empty,"部分行该列为空",1,["课程实施方案《人力资源管理研究方法》26-0514"]
+"主题",jxnr,all_parsed_rows_column_empty,"已解析行但该列全部为空（列映射或单元格丢失）",1,["发展政治经济学"]
+"思政元素的融入和预期教学成效",jxap,partial_rows_column_empty,"部分行该列为空",1,["课程方案模板2026"]
+"思政元素的融入和预期教学成效",jxap,all_parsed_rows_column_empty,"已解析行但该列全部为空（列映射或单元格丢失）",1,["西南财经大学《中国经济理论前沿》教学实施方案2026"]
+"课程/周次",jxap,all_parsed_rows_column_empty,"已解析行但该列全部为空（列映射或单元格丢失）",2,["中级商科研究方法-留学生", "2026年融媒策划课程方案研究生_20260302171347"]
+"学时",jxnr,column_header_unmapped,"MD 表头存在但未映射到标准列名",1,["近现代国际关系史概论"]
+"知识点",jxnr,all_parsed_rows_column_empty,"已解析行但该列全部为空（列映射或单元格丢失）",1,["发展政治经济学"]
+"考察内容",khfsb,all_parsed_rows_column_empty,"已解析行但该列全部为空（列映射或单元格丢失）",1,["0263003049-《税务筹划专题》-吕敏-春季学期-完整版"]

@@ -1,13 +1,19 @@
+"""审核领域模型与规则引擎：课程库比对、学时/周次匹配、必填项检查等。"""
+
 from __future__ import annotations
 
 import hashlib
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import lru_cache
 from pathlib import PurePath
 from typing import Any
 
 from syllabus_auditor.core.audit_labels import audit_wd_label
+from syllabus_auditor.shared.config import load_project_config
+from syllabus_auditor.shared.reason_text import clean_customer_reason, clean_customer_reasons
 
 
 PASS = "pass"
@@ -25,6 +31,7 @@ JXNRXS_LABEL = "\u6559\u5b66\u5185\u5bb9\u662f\u5426\u4e0e\u5b66\u65f6\u5339\u91
 YES = "\u662f"
 NO = "\u5426"
 NON_PASS_STATUSES = {FAIL, WARNING, ERROR, "manual_review"}
+MAX_SEMESTER_WEEK = 19
 
 
 @dataclass(slots=True)
@@ -62,6 +69,7 @@ class CourseMatch:
     course_row: dict[str, Any] | None = None
     candidates: list[dict[str, Any]] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -95,6 +103,9 @@ class AuditRunSummary:
     partial_count: int
     error_count: int
     skipped_count: int = 0
+    llm_empty_count: int = 0
+    llm_parse_error_count: int = 0
+    llm_no_llm_count: int = 0
 
 
 def refresh_subject_audit(audit: SubjectAudit) -> SubjectAudit:
@@ -124,65 +135,41 @@ def refresh_subject_audit(audit: SubjectAudit) -> SubjectAudit:
     return audit
 
 
-BASIC_COMPARISON_FIELDS = (
-    ("kcbh", "kcbh", "\u8bfe\u7a0b\u7f16\u53f7"),
-    ("kkyx", "kkyx", "\u5f00\u8bfe\uff08\u9662\uff09\u7cfb"),
-    ("zwkcmc", "zwkcmc", "\u4e2d\u6587\u8bfe\u7a0b\u540d\u79f0"),
-    ("ywkcmc", "ywkcmc", "\u82f1\u6587\u8bfe\u7a0b\u540d\u79f0"),
-    ("skyy", "skyy", "\u6388\u8bfe\u8bed\u8a00"),
-    ("sfyxwxyxk", "yxwxyxk", "\u662f\u5426\u5141\u8bb8\u5916\u5b66\u9662\u9009\u8bfe"),
-    ("khfs", "khfs", "\u8003\u6838\u65b9\u5f0f"),
-    ("kcxz", "kcxz", "\u8bfe\u7a0b\u6027\u8d28"),
-    ("kclb", "kclb", "\u8bfe\u7a0b\u7c7b\u522b"),
-    ("zxs", "zxs", "\u5468\u5b66\u65f6"),
-    ("skzs", "skzs", "\u4e0a\u8bfe\u5468\u6570"),
-    ("zongxs", "zongxs", "\u603b\u5b66\u65f6"),
-    ("jxxs", "jxxs", "\u6559\u5b66\u5b66\u65f6"),
-    ("kcxf", "kcxf", "\u8bfe\u7a0b\u5b66\u5206"),
-    ("rkjsxm", "zjjsxm", "\u4efb\u8bfe\u6559\u5e08\u59d3\u540d"),
-)
+@lru_cache(maxsize=1)
+def _audit_rules() -> dict[str, Any]:
+    audit = load_project_config().get("audit", {})
+    rules = audit.get("rules") if isinstance(audit, dict) else {}
+    return rules if isinstance(rules, dict) else {}
 
-INDEPENDENT_REQUIRED_JCXX_FIELDS = (
-    ("jsgh", "\u6559\u5e08\u5de5\u53f7"),
-    ("email", "E-mail"),
-    ("lxdh", "\u8054\u7cfb\u7535\u8bdd"),
-)
 
-TOP_LEVEL_REQUIRED = {
-    "kczwjj": "\u8bfe\u7a0b\u4e2d\u6587\u7b80\u4ecb",
-    "kcywjj": "\u8bfe\u7a0b\u82f1\u6587\u7b80\u4ecb",
-    "ybzsyq": "\u9884\u5907\u77e5\u8bc6\u8981\u6c42",
-    "jcjydcl": "\u6559\u6750\u53ca\u9605\u8bfb\u6750\u6599",
-}
+def _tuple_rows(key: str) -> tuple[tuple[str, ...], ...]:
+    rows = _audit_rules().get(key) or []
+    return tuple(tuple(str(cell) for cell in row) for row in rows if isinstance(row, (list, tuple)))
 
-SECTION_REQUIRED = {
-    "kcmb": {"szmb": "\u601d\u653f\u76ee\u6807", "nlmb": "\u80fd\u529b\u76ee\u6807", "zsmb": "\u77e5\u8bc6\u76ee\u6807"},
-    "jxnr": {"tm": "\u6559\u5b66\u5185\u5bb9\u6761\u76ee"},
-    "jxap": {"tm": "\u6559\u5b66\u5b89\u6392\u6761\u76ee"},
-    "khfsb": {"tm": "\u8003\u6838\u65b9\u5f0f\u6761\u76ee"},
-}
 
-ROW_REQUIRED = {
-    "jxnr": {"xh": "\u5e8f\u53f7", "zt": "\u4e3b\u9898", "zsd": "\u77e5\u8bc6\u70b9", "xs": "\u5b66\u65f6"},
-    "jxap": {"zs": "\u5468\u6b21/\u5e8f\u53f7", "sknr": "\u6388\u8bfe\u5185\u5bb9", "skfs": "\u6388\u8bfe\u65b9\u5f0f", "szyqjxx": "\u601d\u653f\u5143\u7d20\u878d\u5165"},
-    "khfsb": {"ksxs": "\u8003\u8bd5\u5f62\u5f0f", "kcnr": "\u8003\u5bdf\u5185\u5bb9", "kcfs": "\u8003\u5bdf\u65b9\u5f0f", "zb": "\u5360\u6bd4"},
-}
+def _string_set(key: str) -> set[str]:
+    values = _audit_rules().get(key) or []
+    return {str(item) for item in values}
 
-FILENAME_NOISE_PATTERNS = (
-    r"\u8bfe\u7a0b\u65b9\u6848\u5b8c\u6574\u7248",
-    r"\u8bfe\u7a0b\u65b9\u6848",
-    r"\u8bfe\u7a0b\u5b9e\u65bd\u65b9\u6848",
-    r"\u6559\u5b66\u5927\u7eb2",
-    r"\u5b8c\u6574\u7248",
-    r"\u6700\u7ec8\u7248",
-    r"\u4fee\u8ba2\u7248",
-    r"\u65b0\u7248",
-)
+
+def _string_dict(key: str) -> dict[str, str]:
+    value = _audit_rules().get(key) or {}
+    return {str(k): str(v) for k, v in value.items()} if isinstance(value, dict) else {}
+
+
+def _nested_dict(key: str) -> dict[str, dict[str, str]]:
+    value = _audit_rules().get(key) or {}
+    if not isinstance(value, dict):
+        return {}
+    return {str(section): {str(k): str(v) for k, v in fields.items()} for section, fields in value.items() if isinstance(fields, dict)}
+
+
+def _pattern_list(key: str) -> tuple[str, ...]:
+    values = _audit_rules().get(key) or []
+    return tuple(str(item) for item in values)
 
 
 def build_subject_key(*, extraction_id: int, course_code: str, source_path: str) -> str:
-    if course_code.strip():
-        return f"kcbh:{course_code.strip()}"
     if extraction_id:
         return f"extraction:{extraction_id}"
     digest = hashlib.sha1(source_path.encode("utf-8")).hexdigest()[:16]
@@ -199,7 +186,7 @@ def extract_course_name_from_source_path(source_path: str) -> str:
     stem = re.sub(r"^[\s\d._-]+", "", stem)
     stem = re.sub(r"[（(][^）)]*[）)]", "", stem)
     stem = re.sub(r"【[^】]*】", "", stem)
-    for pattern in FILENAME_NOISE_PATTERNS:
+    for pattern in _pattern_list("filename_noise_patterns"):
         stem = re.sub(pattern, "", stem)
     stem = re.sub(r"\s+", "", stem)
     stem = stem.strip("_-— ")
@@ -223,7 +210,7 @@ def audit_subject(subject: AuditSubject, course_match: CourseMatch | dict[str, A
     findings.append(jxnrxs_field)
     findings.append(jxapzc_field)
     findings.extend(_required_payload_findings(subject.payload))
-    findings.extend(_extraction_warning_findings(subject.meta))
+    findings.extend(_extraction_warning_findings(subject.meta, existing_findings=findings))
     findings.extend(_hour_consistency_findings(subject.payload))
     findings.extend(_extraction_status_finding(subject.extraction_status))
 
@@ -231,7 +218,7 @@ def audit_subject(subject: AuditSubject, course_match: CourseMatch | dict[str, A
     fail_count = sum(1 for item in findings if item.status in {FAIL, ERROR, "manual_review"})
     warning_count = sum(1 for item in findings if item.status == WARNING)
     overall_status = _overall_status(fail_count, warning_count, subject.extraction_status)
-    summary = _summary(findings, section_findings, match)
+    summary = _summary(findings, section_findings, match, subject)
     return SubjectAudit(
         subject=subject,
         overall_status=overall_status,
@@ -269,7 +256,7 @@ def _audit_basic_info(subject: AuditSubject, match: CourseMatch) -> tuple[list[F
     else:
         dimension_reasons.append(_match_success_message(match))
 
-    for pdf_field, course_field, label in BASIC_COMPARISON_FIELDS:
+    for pdf_field, course_field, label in _tuple_rows("basic_comparison_fields"):
         pdf_value = _exact_value(jcxx.get(pdf_field))
         course_value = _exact_value(course_row.get(course_field))
         finding = _exact_match_finding(
@@ -290,7 +277,7 @@ def _audit_basic_info(subject: AuditSubject, match: CourseMatch) -> tuple[list[F
         if hours_formula_finding.status != PASS:
             dimension_reasons.append(hours_formula_finding.reason or hours_formula_finding.message)
 
-    for pdf_field, label in INDEPENDENT_REQUIRED_JCXX_FIELDS:
+    for pdf_field, label in _tuple_rows("independent_required_jcxx_fields"):
         value = _exact_value(jcxx.get(pdf_field))
         if value:
             findings.append(
@@ -356,21 +343,64 @@ def _exact_match_finding(
     has_course: bool,
 ) -> FieldFinding:
     path = f"payload.jcxx.{pdf_field}"
+    evidence: dict[str, Any] = {"course_field": course_field}
     if not has_course:
-        message = f"\u65e0\u6cd5\u5b9a\u4f4d\u8bfe\u7a0b\u5e93\u8bb0\u5f55\uff0c\u4e0d\u80fd\u5224\u65ad{label}\u662f\u5426\u4e00\u81f4"
-        return FieldFinding(section="jcxx", field=pdf_field, path=path, status=FAIL, reason=message, message=message, expected="", actual=pdf_value, evidence={"course_field": course_field}, suggestion="\u5148\u786e\u8ba4\u8be5 PDF \u5bf9\u5e94\u7684\u8bfe\u7a0b\u5e93\u8bb0\u5f55\u3002")
+        message = f"无法定位课程库记录，不能判断{label}是否一致"
+        return FieldFinding(section="jcxx", field=pdf_field, path=path, status=FAIL, reason=message, message=message, expected="", actual=pdf_value, evidence=evidence, suggestion="先确认该 PDF 对应的课程库记录。")
     if not pdf_value and not course_value:
-        message = f"PDF \u548c\u8bfe\u7a0b\u5e93\u4e2d\u7684{label}\u90fd\u4e3a\u7a7a"
+        message = f"PDF 和课程库中的{label}都为空"
     elif not pdf_value:
-        message = f"{label}\u4e3a\u7a7a"
+        message = f"{label}为空"
     elif not course_value:
-        message = f"\u8bfe\u7a0b\u5e93\u4e2d{label}\u4e3a\u7a7a"
+        message = f"课程库中{label}为空"
+    elif pdf_field in _string_set("numeric_basic_fields") and _numeric_values_equal(pdf_value, course_value):
+        return FieldFinding(section="jcxx", field=pdf_field, path=path, status=PASS, message=f"{label}与课程库一致。", expected=course_value, actual=pdf_value, evidence=evidence)
+    elif pdf_field in _string_set("course_name_fields") and _course_name_values_equal(pdf_field, pdf_value, course_value):
+        evidence = {
+            **evidence,
+            "comparison": "normalized_course_name",
+            "normalized_pdf": _normalize_course_name(pdf_field, pdf_value),
+            "normalized_course": _normalize_course_name(pdf_field, course_value),
+        }
+        return FieldFinding(section="jcxx", field=pdf_field, path=path, status=PASS, message=f"{label}与课程库一致。", expected=course_value, actual=pdf_value, evidence=evidence)
     elif pdf_value != course_value:
-        message = f"{label}\u4e0e\u8bfe\u7a0b\u5e93\u4e0d\u4e00\u81f4\uff1a\u8bfe\u7a0b\u5e93\u4e3a {course_value}\uff0cPDF \u4e3a {pdf_value}"
+        message = f"{label}与课程库不一致：课程库为 {course_value}，PDF 为 {pdf_value}"
     else:
-        return FieldFinding(section="jcxx", field=pdf_field, path=path, status=PASS, message=f"{label}\u4e0e\u8bfe\u7a0b\u5e93\u4e00\u81f4\u3002", expected=course_value, actual=pdf_value, evidence={"course_field": course_field})
+        return FieldFinding(section="jcxx", field=pdf_field, path=path, status=PASS, message=f"{label}与课程库一致。", expected=course_value, actual=pdf_value, evidence=evidence)
 
-    return FieldFinding(section="jcxx", field=pdf_field, path=path, status=FAIL, reason=message, message=message, expected=course_value, actual=pdf_value, evidence={"course_field": course_field}, suggestion=f"\u8bf7\u6838\u5bf9 PDF \u548c\u8bfe\u7a0b\u5e93\u4e2d\u7684{label}\u3002")
+    if pdf_field in _string_set("course_name_fields"):
+        evidence = {
+            **evidence,
+            "comparison": "normalized_course_name",
+            "normalized_pdf": _normalize_course_name(pdf_field, pdf_value),
+            "normalized_course": _normalize_course_name(pdf_field, course_value),
+        }
+    return FieldFinding(section="jcxx", field=pdf_field, path=path, status=FAIL, reason=message, message=message, expected=course_value, actual=pdf_value, evidence=evidence, suggestion=f"请核对 PDF 和课程库中的{label}。")
+
+
+def _course_name_values_equal(field_name: str, left: str, right: str) -> bool:
+    left_value = _normalize_course_name(field_name, left)
+    right_value = _normalize_course_name(field_name, right)
+    return bool(left_value) and left_value == right_value
+
+
+def _normalize_course_name(field_name: str, value: Any) -> str:
+    text = unicodedata.normalize("NFKC", _exact_value(value))
+    text = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", text)
+    text = text.strip().strip("《》<> ")
+    text = text.replace("（", "(").replace("）", ")")
+    text = text.replace("［", "[").replace("］", "]")
+    text = text.replace("【", "[").replace("】", "]")
+    text = text.replace("，", ",").replace("、", ",")
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s*([,;:()\[\]/&+\-])\s*", r"\1", text)
+    if field_name == "ywkcmc":
+        text = text.casefold()
+    return text
+def _numeric_values_equal(left: str, right: str) -> bool:
+    left_number = _number_value(left)
+    right_number = _number_value(right)
+    return left_number is not None and right_number is not None and left_number == right_number
 
 
 def _basic_hours_formula_finding(jcxx: dict[str, Any]) -> FieldFinding | None:
@@ -397,10 +427,10 @@ def _basic_hours_formula_finding(jcxx: dict[str, Any]) -> FieldFinding | None:
 
 def _required_payload_findings(payload: dict[str, Any]) -> list[FieldFinding]:
     findings: list[FieldFinding] = []
-    for field_name, label in TOP_LEVEL_REQUIRED.items():
+    for field_name, label in _string_dict("top_level_required").items():
         findings.append(_presence_finding("payload", field_name, f"payload.{field_name}", label, payload.get(field_name)))
 
-    for section, fields in SECTION_REQUIRED.items():
+    for section, fields in _nested_dict("section_required").items():
         block = _as_dict(payload.get(section))
         for field_name, label in fields.items():
             findings.append(
@@ -413,11 +443,8 @@ def _required_payload_findings(payload: dict[str, Any]) -> list[FieldFinding]:
 
 
 def _append_kcyq_findings(payload: dict[str, Any], findings: list[FieldFinding]) -> None:
-    kcyqb = _as_dict(payload.get("kcyqb"))
     has_text = not _is_empty(payload.get("kcyq"))
-    has_table = not _is_empty(kcyqb.get("tm"))
-    has_summary = not _is_empty(kcyqb.get("yqgs"))
-    if has_text or has_table or has_summary:
+    if has_text:
         findings.append(
             FieldFinding(
                 section="kcyq",
@@ -425,7 +452,7 @@ def _append_kcyq_findings(payload: dict[str, Any], findings: list[FieldFinding])
                 path="payload.kcyq",
                 status=PASS,
                 message="课程要求已填写。",
-                actual={"has_text": has_text, "has_table": has_table, "has_summary": has_summary},
+                actual={"has_text": has_text},
             )
         )
     else:
@@ -436,7 +463,7 @@ def _append_kcyq_findings(payload: dict[str, Any], findings: list[FieldFinding])
                 path="payload.kcyq",
                 status=FAIL,
                 reason="课程要求为空",
-                message="课程要求为空，未抽取到文本或结构化条目。",
+                message="课程要求为空，未抽取到文本。",
                 actual="",
                 suggestion="补充课程要求，或检查 PDF 模板中课程要求章节是否可识别。",
             )
@@ -444,7 +471,7 @@ def _append_kcyq_findings(payload: dict[str, Any], findings: list[FieldFinding])
 
 
 def _append_row_findings(payload: dict[str, Any], findings: list[FieldFinding]) -> None:
-    for section, fields in ROW_REQUIRED.items():
+    for section, fields in _nested_dict("row_required").items():
         rows = _as_list(_as_dict(payload.get(section)).get("tm"))
         for index, row in enumerate(rows):
             row_dict = _as_dict(row)
@@ -476,14 +503,26 @@ def _presence_finding(section: str, field_name: str, path: str, label: str, valu
     )
 
 
-def _extraction_warning_findings(meta: dict[str, Any]) -> list[FieldFinding]:
+def _extraction_warning_findings(
+    meta: dict[str, Any],
+    *,
+    existing_findings: list[FieldFinding] | None = None,
+) -> list[FieldFinding]:
     findings: list[FieldFinding] = []
+    duplicate_keys = _duplicate_warning_keys(existing_findings or [])
     for index, warning in enumerate(_as_list(meta.get("extraction_warnings"))):
         warning_dict = _as_dict(warning)
         section = _text(warning_dict.get("section")) or "system"
         field_name = _text(warning_dict.get("field")) or "warning"
         raw_reason = _text(warning_dict.get("reason")) or "extraction_warning"
         path = _text(warning_dict.get("path")) or f"meta.extraction_warnings[{index}]"
+        if raw_reason in {"missing_field", "empty_section"} and _is_duplicate_extraction_warning(
+            path=path,
+            section=section,
+            field_name=field_name,
+            duplicate_keys=duplicate_keys,
+        ):
+            continue
         label = _text(warning_dict.get("label")) or field_name
         status = FAIL if raw_reason in {"missing_field", "empty_section"} else WARNING
         detail = _text(warning_dict.get("detail"))
@@ -502,6 +541,29 @@ def _extraction_warning_findings(meta: dict[str, Any]) -> list[FieldFinding]:
             )
         )
     return findings
+
+
+def _duplicate_warning_keys(findings: list[FieldFinding]) -> dict[str, set[tuple[str, str] | str]]:
+    keys: dict[str, set[tuple[str, str] | str]] = {"paths": set(), "section_fields": set()}
+    for finding in findings:
+        if finding.status not in {FAIL, ERROR, "manual_review"}:
+            continue
+        if finding.path:
+            keys["paths"].add(finding.path)
+        keys["section_fields"].add((finding.section, finding.field))
+    return keys
+
+
+def _is_duplicate_extraction_warning(
+    *,
+    path: str,
+    section: str,
+    field_name: str,
+    duplicate_keys: dict[str, set[tuple[str, str] | str]],
+) -> bool:
+    if path in duplicate_keys["paths"]:
+        return True
+    return (section, field_name) in duplicate_keys["section_fields"]
 
 
 def _hour_consistency_findings(payload: dict[str, Any]) -> list[FieldFinding]:
@@ -616,7 +678,12 @@ def _overall_status(fail_count: int, warning_count: int, extraction_status: str 
     return "pass"
 
 
-def _summary(field_findings: list[FieldFinding], section_findings: list[SectionFinding], match: CourseMatch) -> dict[str, Any]:
+def _summary(
+    field_findings: list[FieldFinding],
+    section_findings: list[SectionFinding],
+    match: CourseMatch,
+    subject: AuditSubject,
+) -> dict[str, Any]:
     failed = [item for item in field_findings if item.status in {FAIL, ERROR, "manual_review"}]
     warnings = [item for item in field_findings if item.status == WARNING]
     return {
@@ -625,7 +692,7 @@ def _summary(field_findings: list[FieldFinding], section_findings: list[SectionF
         "main_reasons": _dedupe([item.reason for item in failed + warnings if item.reason])[:20],
         "messages": [item.message for item in failed[:5]],
         "sections": {item.wd: item.status for item in section_findings},
-        "course_match": _course_match_summary(match, None),
+        "course_match": _course_match_summary(match, subject),
     }
 
 
@@ -639,7 +706,7 @@ def _coerce_course_match(value: CourseMatch | dict[str, Any] | None) -> CourseMa
 
 def _course_match_summary(match: CourseMatch, subject: AuditSubject | None) -> dict[str, Any]:
     row = match.course_row or {}
-    return {
+    summary = {
         "status": match.status,
         "method": match.method,
         "query": match.query,
@@ -648,7 +715,11 @@ def _course_match_summary(match: CourseMatch, subject: AuditSubject | None) -> d
         "source_path": subject.source_path if subject else "",
         "candidate_count": len(match.candidates),
     }
-
+    if subject:
+        jcxx = _as_dict(subject.payload.get("jcxx"))
+        summary["original_kcbh"] = _exact_value(jcxx.get("kcbh") or subject.course_code)
+    summary.update(match.metadata)
+    return summary
 
 def _course_match_evidence(match: CourseMatch, subject: AuditSubject) -> dict[str, Any]:
     return {
@@ -663,6 +734,12 @@ def _course_match_evidence(match: CourseMatch, subject: AuditSubject) -> dict[st
 def _match_success_message(match: CourseMatch) -> str:
     row = match.course_row or {}
     name = _exact_value(row.get("zwkcmc")) or _exact_value(row.get("kcbh"))
+    if match.method == "matched_by_pdf_name_for_duplicate_kcbh":
+        return f"本轮审核中存在多个 PDF 填写同一课程编号，已根据 PDF 中的课程名称定位审核对照课程：{name}"
+    if match.method == "matched_by_source_path_for_duplicate_kcbh":
+        return f"本轮审核中存在多个 PDF 填写同一课程编号，已根据文件名定位审核对照课程：{name}"
+    if match.method == "matched_by_kcbh_after_duplicate_unresolved":
+        return f"本轮审核中存在多个 PDF 填写同一课程编号，未能通过课程名称或文件名唯一定位其它课程，已按原课程编号定位审核对照课程：{name}"
     if match.method == "matched_by_source_path":
         return f"通过文件路径匹配到课程库课程：{name}"
     if match.method == "matched_by_pdf_name":
@@ -765,14 +842,7 @@ def _audit_teaching_content_hours(payload: dict[str, Any], meta: dict[str, Any])
     evidence = {"jcxx_zongxs": jcxx_total, "jxnr_zongxs": jxnr_total, "fallback_used": jcxx_total.get("source") == "meta" or jxnr_total.get("source") == "meta"}
 
     reasons: list[str] = []
-    if jcxx_total.get("ambiguous") or jxnr_total.get("ambiguous"):
-        reasons.append("meta \u4e2d\u603b\u5b66\u65f6\u6765\u6e90\u65e0\u6cd5\u533a\u5206\uff0c\u9700\u4eba\u5de5\u590d\u6838")
-    if jcxx_total.get("number") is None:
-        reasons.append("\u57fa\u7840\u4fe1\u606f\u603b\u5b66\u65f6\u4e3a\u7a7a" if not jcxx_total.get("raw_value") else "\u57fa\u7840\u4fe1\u606f\u603b\u5b66\u65f6\u4e0d\u662f\u53ef\u8ba1\u7b97\u6570\u5b57")
-    if jxnr_total.get("number") is None:
-        reasons.append("\u6559\u5b66\u5185\u5bb9\u603b\u5b66\u65f6\u4e3a\u7a7a" if not jxnr_total.get("raw_value") else "\u6559\u5b66\u5185\u5bb9\u603b\u5b66\u65f6\u4e0d\u662f\u53ef\u8ba1\u7b97\u6570\u5b57")
-    if jcxx_total.get("source") == "meta" and jxnr_total.get("source") == "meta" and jcxx_total.get("source_path") == jxnr_total.get("source_path") and jcxx_total.get("snippet") == jxnr_total.get("snippet"):
-        reasons.append("meta \u4e2d\u603b\u5b66\u65f6\u6765\u6e90\u65e0\u6cd5\u533a\u5206\uff0c\u9700\u4eba\u5de5\u590d\u6838")
+    reasons.extend(_semantic_number_issue_reasons(jcxx_total, jxnr_total))
 
     jcxx_number = jcxx_total.get("number")
     jxnr_number = jxnr_total.get("number")
@@ -788,8 +858,41 @@ def _audit_teaching_content_hours(payload: dict[str, Any], meta: dict[str, Any])
     return FieldFinding(section="jxnr", field="zongxs", path="payload.jxnr.zongxs", status=PASS, message=message, expected=jcxx_total, actual=jxnr_total, evidence=evidence), SectionFinding(wd=JXNRXS_WD, status=PASS, message=YES, evidence=evidence, details={"label": JXNRXS_LABEL, "result": YES, "reasons": []})
 
 
+def _semantic_number_issue_reasons(jcxx_total: dict[str, Any], jxnr_total: dict[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    if jcxx_total.get("ambiguous"):
+        reasons.append(_ambiguous_total_reason("基础信息总学时", jcxx_total))
+    if jxnr_total.get("ambiguous"):
+        reasons.append(_ambiguous_total_reason("教学内容总学时", jxnr_total))
+    if jcxx_total.get("number") is None and not jcxx_total.get("ambiguous"):
+        reasons.append("基础信息总学时为空" if not jcxx_total.get("raw_value") else "基础信息总学时不是可计算数字")
+    if jxnr_total.get("number") is None and not jxnr_total.get("ambiguous"):
+        reasons.append("教学内容总学时为空" if not jxnr_total.get("raw_value") else "教学内容总学时不是可计算数字")
+    if (
+        jcxx_total.get("source") == "meta"
+        and jxnr_total.get("source") == "meta"
+        and jcxx_total.get("source_path") == jxnr_total.get("source_path")
+        and jcxx_total.get("snippet") == jxnr_total.get("snippet")
+    ):
+        reasons.append("基础信息总学时和教学内容总学时引用了同一处原文数值，无法确认该数值同时代表教学内容课时总计，需人工复核。")
+    return reasons
+
+
+def _ambiguous_total_reason(label: str, item: dict[str, Any]) -> str:
+    source = item.get("ambiguous_source") if isinstance(item.get("ambiguous_source"), dict) else {}
+    raw_value = _exact_value(source.get("raw_value")) or "总学时"
+    snippet = _exact_value(source.get("snippet"))
+    if "课程学时安排" in snippet or "周学时" in snippet or "上课周数" in snippet:
+        if label == "教学内容总学时":
+            return f"教学内容总学时为空；原文中的“{raw_value}”属于课程学时安排或基础信息，不是教学内容课时总计，因此不能判定学时匹配。"
+        return f"{label}为空；原文中的“{raw_value}”属于课程学时安排或基础信息，不能确认该字段已填写。"
+    if source.get("section_hint"):
+        return f"{label}为空；原文中的“{raw_value}”出现在{source.get('section_hint')}附近，不能确认是{label}。"
+    return f"{label}为空；原文中的“{raw_value}”没有明确归属，不能确认是{label}。"
+
+
 def _audit_schedule_weeks(payload: dict[str, Any], meta: dict[str, Any]) -> tuple[FieldFinding, SectionFinding]:
-    skzs = _resolve_semantic_number(payload_value=_as_dict(payload.get("jcxx")).get("skzs"), payload_path="payload.jcxx.skzs", semantic_field="jcxx.skzs", meta=meta, section_hints=("\u8bfe\u7a0b\u57fa\u672c\u4fe1\u606f", "\u57fa\u672c\u4fe1\u606f", "\u8bfe\u7a0b\u4fe1\u606f"), value_keywords=("\u4e0a\u8bfe\u5468\u6570", "\u6388\u8bfe\u5468\u6570", "\u6559\u5b66\u5468\u6570"))
+    skzs = _resolve_semantic_number(payload_value=_as_dict(payload.get("jcxx")).get("skzs"), payload_path="payload.jcxx.skzs", semantic_field="jcxx.skzs", meta=meta, section_hints=("课程基本信息", "基本信息", "课程信息"), value_keywords=("上课周数", "授课周数", "教学周数"))
     schedule = _resolve_schedule_weeks(payload, meta)
     expected_week = skzs.get("number")
     parsed_weeks = sorted(schedule["weeks"])
@@ -799,29 +902,23 @@ def _audit_schedule_weeks(payload: dict[str, Any], meta: dict[str, Any]) -> tupl
 
     reasons: list[str] = []
     if expected_week is None:
-        reasons.append("\u57fa\u7840\u4fe1\u606f\u4e0a\u8bfe\u5468\u6570\u4e3a\u7a7a" if not skzs.get("raw_value") else "\u57fa\u7840\u4fe1\u606f\u4e0a\u8bfe\u5468\u6570\u4e0d\u662f\u53ef\u8ba1\u7b97\u6570\u5b57")
+        reasons.append("基础信息上课周数为空" if not skzs.get("raw_value") else "基础信息上课周数不是可计算数字")
     if not parsed_weeks:
-        reasons.append("\u6559\u5b66\u5b89\u6392\u5468\u6b21\u4e3a\u7a7a\uff0c\u65e0\u6cd5\u5224\u65ad\u5468\u6b21\u662f\u5426\u8fde\u7eed")
-    if schedule["errors"]:
-        reasons.extend(schedule["errors"])
-    if missing_weeks:
-        reasons.append(f"\u6559\u5b66\u5b89\u6392\u5468\u6b21\u4e0d\u8fde\u7eed\uff0c\u7f3a\u5c11{_format_week_list(missing_weeks)}")
-    if duplicate_weeks:
-        reasons.append(f"\u6559\u5b66\u5b89\u6392\u5468\u6b21\u91cd\u590d\uff0c\u91cd\u590d\u5468\u6b21\u4e3a{_format_week_list(duplicate_weeks)}")
+        reasons.append("教学安排周次为空，无法判断最大周次是否匹配")
+    reasons.extend(schedule.get("errors") or [])
     if expected_week is not None and max_week is not None and max_week != expected_week:
-        reasons.append(f"\u6559\u5b66\u5b89\u6392\u6700\u5927\u5468\u6b21\u4e3a {max_week}\uff0c\u57fa\u7840\u4fe1\u606f\u4e0a\u8bfe\u5468\u6570\u4e3a {expected_week}")
+        reasons.append(f"教学安排最大周次为 {max_week}，基础信息上课周数为 {expected_week}")
 
     schedule_evidence = {**schedule, "weeks": parsed_weeks, "duplicates": duplicate_weeks}
     evidence = {"jcxx_skzs": skzs, "schedule_weeks": schedule_evidence, "expected_skzs": expected_week, "parsed_weeks": parsed_weeks, "missing_weeks": missing_weeks, "duplicate_weeks": duplicate_weeks, "max_week": max_week, "fallback_used": skzs.get("source") == "meta" or schedule.get("source") == "meta"}
 
     reasons = _dedupe(reasons)
     if reasons:
-        reason = "\uff1b".join(reasons)
-        return FieldFinding(section="jxap", field="zs", path="payload.jxap.tm[].zs", status=FAIL, reason=reason, message=reason, expected=skzs, actual=schedule_evidence, evidence=evidence, suggestion="\u8bf7\u6838\u5bf9\u6559\u5b66\u5b89\u6392\u8868\u7684\u5468\u6b21\u662f\u5426\u4ece\u7b2c 1 \u5468\u5f00\u59cb\u8fde\u7eed\u8986\u76d6\uff0c\u5e76\u4e0e\u57fa\u7840\u4fe1\u606f\u4e0a\u8bfe\u5468\u6570\u4e00\u81f4\u3002"), SectionFinding(wd=JXAPZC_WD, status=FAIL, message=NO, evidence=evidence, suggestion="\u67e5\u770b audit_field_findings \u4e2d section='jxap'\u3001field='zs' \u7684\u5b57\u6bb5\u539f\u56e0\u3002", details={"label": JXAPZC_LABEL, "result": NO, "reasons": reasons})
+        reason = "；".join(reasons)
+        return FieldFinding(section="jxap", field="zs", path="payload.jxap.tm[].zs", status=FAIL, reason=reason, message=reason, expected=skzs, actual=schedule_evidence, evidence=evidence, suggestion="请核对教学安排中的最大周次是否与基础信息上课周数一致。"), SectionFinding(wd=JXAPZC_WD, status=FAIL, message=NO, evidence=evidence, suggestion="查看 audit_field_findings 中 section='jxap'、field='zs' 的字段原因。", details={"label": JXAPZC_LABEL, "result": NO, "reasons": reasons})
 
-    message = "\u6559\u5b66\u5b89\u6392\u5468\u6b21\u8fde\u7eed\uff0c\u4e14\u6700\u5927\u5468\u6b21\u4e0e\u57fa\u7840\u4fe1\u606f\u4e0a\u8bfe\u5468\u6570\u4e00\u81f4\u3002"
+    message = "教学安排最大周次与基础信息上课周数一致。"
     return FieldFinding(section="jxap", field="zs", path="payload.jxap.tm[].zs", status=PASS, message=message, expected=skzs, actual=schedule_evidence, evidence=evidence), SectionFinding(wd=JXAPZC_WD, status=PASS, message=YES, evidence=evidence, details={"label": JXAPZC_LABEL, "result": YES, "reasons": []})
-
 
 def _resolve_semantic_number(
     *,
@@ -930,7 +1027,8 @@ def _number_from_snippet(snippet: str, value_keywords: tuple[str, ...]) -> dict[
 
 
 def _resolve_schedule_weeks(payload: dict[str, Any], meta: dict[str, Any]) -> dict[str, Any]:
-    rows = _as_list(_as_dict(payload.get("jxap")).get("tm"))
+    jxap = _as_dict(payload.get("jxap"))
+    rows = _as_list(jxap.get("tm"))
     parsed = _collect_week_values(
         [
             {
@@ -941,22 +1039,68 @@ def _resolve_schedule_weeks(payload: dict[str, Any], meta: dict[str, Any]) -> di
         ],
         source="payload",
     )
-    if parsed["weeks"] or parsed["errors"]:
+    if parsed["weeks"] or parsed["errors"] or parsed["warnings"]:
         return parsed
+
+    apgs_values = _schedule_week_values_from_apgs(jxap.get("apgs"))
+    apgs = _collect_week_values(apgs_values, source="payload")
+    if apgs["weeks"] or apgs["errors"] or apgs["warnings"]:
+        return apgs
 
     meta_values = _schedule_week_values_from_meta(meta)
     fallback = _collect_week_values(meta_values, source="meta")
-    if fallback["weeks"] or fallback["errors"]:
+    if fallback["weeks"] or fallback["errors"] or fallback["warnings"]:
         return fallback
     return parsed
 
 
+def _schedule_week_values_from_apgs(value: Any) -> list[dict[str, str]]:
+    text = _normalize_week_text(value)
+    if not text or not any(keyword in text for keyword in ("周", "周次", "教学周", "授课周")):
+        return []
+
+    week_number = r"第?\s*[零〇一二两三四五六七八九十\d]+"
+    week_range = rf"{week_number}\s*(?:[-~—–至到]\s*[零〇一二两三四五六七八九十\d]+)?"
+    row_marker = r"(?:导论|绪论|考试|复习|实践|实验|研讨|讨论|汇报|第?\s*[零〇一二两三四五六七八九十\d]+\s*[章节讲篇部分单元])"
+    pattern = re.compile(rf"(?<![\dA-Za-z])({week_range})(?=\s*{row_marker})")
+
+    values: list[dict[str, str]] = []
+    for match in pattern.finditer(text):
+        values.append(
+            {
+                "raw_value": match.group(1),
+                "source_path": "payload.jxap.apgs",
+                "section_hint": "教学安排概述",
+                "snippet": text[max(0, match.start() - 80) : match.end() + 160],
+                "week_context": True,
+            }
+        )
+    return values
+
+
 def _schedule_week_values_from_meta(meta: dict[str, Any]) -> list[dict[str, str]]:
     values: list[dict[str, str]] = []
+    week_number = r"第?\s*[零〇一二两三四五六七八九十\d]+"
+    week_range = rf"{week_number}\s*(?:[-~—–至到]\s*[零〇一二两三四五六七八九十\d]+)?"
+    trailing_week_list = re.compile(rf"{week_range}(?:\s*[,，、;；]\s*{week_range})+\s*(?:周|周次)")
+    explicit_week = re.compile(rf"{week_range}\s*(?:周|周次)")
+    week_column = re.compile(r"(?:周次|授课周次|教学周次|教学周|授课周)\s*[:：]?\s*([第零〇一二两三四五六七八九十\d\s,，、;；~\-—–至到周次]+)")
     for source in _meta_text_sources(meta):
-        for item in _section_snippets(source["text"], ("\u6559\u5b66\u5b89\u6392", "\u8bfe\u7a0b\u5b89\u6392", "\u6388\u8bfe\u5b89\u6392", "\u6559\u5b66\u8fdb\u5ea6")):
-            for match in re.finditer(r"(?:\u7b2c?\s*\d+\s*(?:\u5468|\u5468\u6b21)?\s*(?:[-~\u2014\u2013\u81f3\u5230]\s*\d+\s*(?:\u5468|\u5468\u6b21)?)?)(?:\s*[,\uff0c\u3001\uff1b;]\s*\u7b2c?\s*\d+\s*(?:\u5468|\u5468\u6b21)?\s*(?:[-~\u2014\u2013\u81f3\u5230]\s*\d+\s*(?:\u5468|\u5468\u6b21)?)?)*", item["snippet"]):
-                values.append({"raw_value": match.group(0), "source_path": source["source_path"], "section_hint": item["section_hint"], "snippet": item["snippet"][:500]})
+        for item in _section_snippets(source["text"], ("教学安排", "课程安排", "授课安排", "教学进度")):
+            snippet = item["snippet"]
+            covered_spans: list[tuple[int, int]] = []
+            for match in week_column.finditer(snippet):
+                raw = match.group(1).strip()
+                if raw:
+                    covered_spans.append(match.span())
+                    values.append({"raw_value": raw, "source_path": source["source_path"], "section_hint": item["section_hint"], "snippet": snippet[:500], "week_context": True})
+            for match in trailing_week_list.finditer(snippet):
+                covered_spans.append(match.span())
+                values.append({"raw_value": match.group(0), "source_path": source["source_path"], "section_hint": item["section_hint"], "snippet": snippet[:500], "week_context": True})
+            for match in explicit_week.finditer(snippet):
+                if any(start <= match.start() and match.end() <= end for start, end in covered_spans):
+                    continue
+                values.append({"raw_value": match.group(0), "source_path": source["source_path"], "section_hint": item["section_hint"], "snippet": snippet[:500]})
     return values
 
 
@@ -964,42 +1108,148 @@ def _collect_week_values(values: list[dict[str, str]], *, source: str) -> dict[s
     weeks: set[int] = set()
     duplicates: set[int] = set()
     errors: list[str] = []
+    warnings: list[str] = []
+    out_of_range_values: set[int] = set()
     sources: list[dict[str, Any]] = []
     for item in values:
         raw_value = _exact_value(item.get("raw_value"))
         if not raw_value:
             continue
-        parsed = _parse_week_expression(raw_value)
+        parsed = _parse_week_expression(raw_value, allow_bare=source == "payload" or bool(item.get("week_context")))
         errors.extend(parsed["errors"])
+        out_of_range_values.update(parsed["out_of_range"])
         for week in parsed["weeks"]:
             if week in weeks:
                 duplicates.add(week)
             weeks.add(week)
-        sources.append({**item, "weeks": sorted(parsed["weeks"])})
-    return {"source": source, "weeks": weeks, "duplicates": duplicates, "errors": _dedupe(errors), "sources": sources}
-
-
-def _parse_week_expression(value: Any) -> dict[str, Any]:
-    text = _exact_value(value)
-    weeks: set[int] = set()
-    errors: list[str] = []
-    masked = text
-    range_pattern = re.compile(r"\u7b2c?\s*(\d+)\s*(?:\u5468|\u5468\u6b21)?\s*[-~\u2014\u2013\u81f3\u5230]\s*(\d+)\s*(?:\u5468|\u5468\u6b21)?")
-    for match in range_pattern.finditer(text):
-        start = int(match.group(1))
-        end = int(match.group(2))
-        if start > end:
-            errors.append(f"\u6559\u5b66\u5b89\u6392\u5468\u6b21\u533a\u95f4\u4e0d\u5408\u6cd5\uff1a{match.group(0)}")
+        sources.append({**item, "weeks": sorted(parsed["weeks"]), "out_of_range": sorted(parsed["out_of_range"])})
+    if out_of_range_values:
+        if source == "meta":
+            warnings.append("原文中存在疑似非周次数字，已过滤超过 19 的候选值，需人工复核。")
         else:
-            weeks.update(range(start, end + 1))
-        masked = masked.replace(match.group(0), " ")
-    for match in re.finditer(r"\u7b2c?\s*(\d+)\s*(?:\u5468|\u5468\u6b21)?", masked):
-        weeks.add(int(match.group(1)))
-    if not weeks and text:
-        errors.append(f"\u6559\u5b66\u5b89\u6392\u5468\u6b21\u65e0\u6cd5\u89e3\u6790\uff1a{text}")
-    return {"weeks": weeks, "errors": errors}
+            warnings.append("教学安排周次出现超过 19 的值，已按一学期最大 19 周处理，需人工复核原文周次。")
+    return {"source": source, "weeks": weeks, "duplicates": duplicates, "errors": _dedupe(errors), "warnings": _dedupe(warnings), "out_of_range": sorted(out_of_range_values), "sources": sources}
 
 
+def _parse_week_expression(value: Any, *, allow_bare: bool) -> dict[str, Any]:
+    text = _normalize_week_text(value)
+    weeks: set[int] = set()
+    out_of_range: set[int] = set()
+    errors: list[str] = []
+    if not text:
+        return {"weeks": weeks, "errors": errors, "out_of_range": out_of_range}
+
+    explicit_tokens = _explicit_week_tokens(text)
+    if explicit_tokens:
+        for token in explicit_tokens:
+            token_weeks, token_out, token_errors = _parse_week_token(token, allow_bare=True)
+            weeks.update(token_weeks)
+            out_of_range.update(token_out)
+            errors.extend(token_errors)
+        if not allow_bare:
+            return {"weeks": weeks, "errors": errors, "out_of_range": out_of_range}
+
+    tokens = [token.strip() for token in re.split(r"[,，、;；\s]+", text) if token.strip()]
+    if not tokens:
+        tokens = [text]
+
+    for token in tokens:
+        if token in {"周", "周次"}:
+            continue
+        if not allow_bare and not _has_week_context(token):
+            continue
+        token_weeks, token_out, token_errors = _parse_week_token(token, allow_bare=allow_bare)
+        weeks.update(token_weeks)
+        out_of_range.update(token_out)
+        errors.extend(token_errors)
+
+    if not weeks and not out_of_range and text:
+        errors.append(f"教学安排周次无法解析：{_exact_value(value)}")
+    return {"weeks": weeks, "errors": errors, "out_of_range": out_of_range}
+
+
+def _explicit_week_tokens(text: str) -> list[str]:
+    token_pattern = re.compile(
+        r"第?\s*[零〇一二两三四五六七八九十\d]+\s*"
+        r"(?:[-~—–至到]\s*[零〇一二两三四五六七八九十\d]+)?\s*"
+        r"(?:周次|周)"
+    )
+    return [match.group(0) for match in token_pattern.finditer(text)]
+
+
+def _parse_week_token(token: str, *, allow_bare: bool) -> tuple[set[int], set[int], list[str]]:
+    weeks: set[int] = set()
+    out_of_range: set[int] = set()
+    errors: list[str] = []
+    cleaned = token.strip()
+    cleaned = re.sub(r"^(?:周次|授课周次|教学周次|教学周|授课周)[:：]?", "", cleaned)
+    cleaned = cleaned.removeprefix("第")
+    cleaned = re.sub(r"(?:周次|周)$", "", cleaned)
+    cleaned = cleaned.strip()
+
+    range_parts = re.split(r"[-~—–至到]", cleaned, maxsplit=1)
+    if len(range_parts) == 2:
+        start = _week_number_value(range_parts[0])
+        end = _week_number_value(range_parts[1])
+        if start is None or end is None:
+            errors.append(f"教学安排周次无法解析：{token}")
+            return weeks, out_of_range, errors
+        if start > end:
+            errors.append(f"教学安排周次区间不合法：{token}")
+            return weeks, out_of_range, errors
+        for week in range(start, end + 1):
+            _add_week_value(week, weeks, out_of_range)
+        return weeks, out_of_range, errors
+
+    if not allow_bare and not _has_week_context(token):
+        return weeks, out_of_range, errors
+    week = _week_number_value(cleaned)
+    if week is None:
+        errors.append(f"教学安排周次无法解析：{token}")
+    else:
+        _add_week_value(week, weeks, out_of_range)
+    return weeks, out_of_range, errors
+
+
+def _normalize_week_text(value: Any) -> str:
+    text = unicodedata.normalize("NFKC", _exact_value(value))
+    text = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", text)
+    return text.strip()
+
+
+def _has_week_context(text: str) -> bool:
+    return any(keyword in text for keyword in ("周", "周次", "教学周", "授课周"))
+
+
+def _week_number_value(value: str) -> int | None:
+    text = value.strip().removeprefix("第")
+    text = re.sub(r"(?:周次|周)$", "", text).strip()
+    if re.fullmatch(r"\d+", text):
+        return int(text)
+    return _chinese_number_value(text)
+
+
+def _chinese_number_value(text: str) -> int | None:
+    digits = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+    if not text:
+        return None
+    if text in digits:
+        return digits[text]
+    if text == "十":
+        return 10
+    if "十" in text:
+        left, _, right = text.partition("十")
+        tens = digits.get(left, 1) if left else 1
+        ones = digits.get(right, 0) if right else 0
+        return tens * 10 + ones
+    return None
+
+
+def _add_week_value(value: int, weeks: set[int], out_of_range: set[int]) -> None:
+    if 1 <= value <= MAX_SEMESTER_WEEK:
+        weeks.add(value)
+    else:
+        out_of_range.add(value)
 def _format_week_list(weeks: list[int]) -> str:
     if not weeks:
         return ""

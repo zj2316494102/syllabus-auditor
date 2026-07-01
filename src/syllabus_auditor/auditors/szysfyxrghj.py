@@ -1,24 +1,39 @@
-﻿from __future__ import annotations
+"""维度：是否将思政元素有效融入各环节（szysfyxrghj）。"""
+
+from __future__ import annotations
 
 import json
-import re
-from typing import Any, Protocol
+from typing import Any
 
-from syllabus_auditor.auditors.szysfyxrghj_prompt import build_prompt
-from syllabus_auditor.core.audit import FAIL, PASS, AuditSubject, FieldFinding, SectionFinding
-from config import load_project_config
-from syllabus_auditor.core.llm import build_llm_trace
-
+from syllabus_auditor.shared.config import load_project_config
+from syllabus_auditor.core.audit import FAIL, NO, PASS, YES, AuditSubject, FieldFinding, SectionFinding
+from syllabus_auditor.core.llm import EmptyLlmResponseError, build_llm_trace
+from syllabus_auditor.shared.reason_text import clean_customer_reason
+from syllabus_auditor.utils import (
+    CONTENT_LAYOUT_RULES,
+    EMPTY_LLM_REASON,
+    FALLBACK_REASON,
+    MANUAL_REVIEW_SUGGESTION,
+    PARSE_ERROR_REASON,
+    JsonLlmClient,
+    as_dict,
+    as_list,
+    build_jxap_audit_data,
+    build_kcmb_audit_data,
+    exact_value,
+    extract_source_keyword_segments,
+    looks_template_text,
+    merge_reasons,
+    parse_llm_json,
+    result_value,
+    string_list,
+)
 
 DIMENSION = "szysfyxrghj"
-DIMENSION_LABEL = "\u662f\u5426\u5c06\u601d\u653f\u5143\u7d20\u6709\u6548\u878d\u5165\u5404\u73af\u8282"
+DIMENSION_LABEL = "是否将思政元素有效融入各环节"
 FIELD = "szyr"
-FIELD_LABEL = "\u601d\u653f\u5143\u7d20\u878d\u5165"
-YES = "\u662f"
-NO = "\u5426"
-FALLBACK_REASON = "\u6a21\u578b\u672a\u7ed9\u51fa\u4e0d\u901a\u8fc7\u539f\u56e0\uff0c\u9700\u4eba\u5de5\u590d\u6838"
-NO_LLM_REASON = "\u672a\u914d\u7f6e LLM\uff0c\u65e0\u6cd5\u5ba1\u6838\u662f\u5426\u5c06\u601d\u653f\u5143\u7d20\u6709\u6548\u878d\u5165\u5404\u73af\u8282\uff0c\u9700\u4eba\u5de5\u590d\u6838"
-PARSE_ERROR_REASON = "\u6a21\u578b\u8f93\u51fa\u683c\u5f0f\u65e0\u6cd5\u89e3\u6790\uff0c\u9700\u4eba\u5de5\u590d\u6838"
+NO_LLM_REASON = f"未配置 LLM，无法审核{DIMENSION_LABEL}，需人工复核"
+
 
 def _dimension_config() -> dict[str, Any]:
     audit_config = load_project_config().get("audit", {})
@@ -31,25 +46,13 @@ ARRANGEMENT_SECTION_HINTS = tuple(str(item) for item in _dimension_config().get(
 IDEOLOGY_KEYWORDS = tuple(str(item) for item in _dimension_config().get("ideology_keywords", []))
 
 
-class JsonLlmClient(Protocol):
-    def complete_json(self, prompt: str) -> str:
-        ...
-
-
 def audit_szysfyxrghj(subject: AuditSubject, llm_client: JsonLlmClient | None) -> tuple[SectionFinding, list[FieldFinding]]:
     audit_input = build_audit_input(subject.payload, subject.meta)
-    prompt = build_prompt(audit_input)
+    prompt = _build_prompt(audit_input)
 
     if llm_client is None:
-        trace = build_llm_trace(
-            llm_client=None,
-            dimension=DIMENSION,
-            item=FIELD,
-            prompt=prompt,
-            status="no_llm",
-        )
-        result = _manual_result(NO_LLM_REASON, trace)
-        return build_findings(result, audit_input)
+        trace = build_llm_trace(llm_client=None, dimension=DIMENSION, item=FIELD, prompt=prompt, status="no_llm")
+        return _build_findings(_manual_result(NO_LLM_REASON, trace), audit_input)
 
     raw_response = ""
     try:
@@ -64,7 +67,19 @@ def audit_szysfyxrghj(subject: AuditSubject, llm_client: JsonLlmClient | None) -
             parsed=parsed,
             status="parsed",
         )
-        result = normalize_llm_result(parsed, trace)
+        result = _normalize_llm_result(parsed, trace)
+    except EmptyLlmResponseError as exc:
+        reason = f"{EMPTY_LLM_REASON}：{type(exc).__name__}: {exc}"
+        trace = build_llm_trace(
+            llm_client=llm_client,
+            dimension=DIMENSION,
+            item=FIELD,
+            prompt=prompt,
+            raw_response=raw_response,
+            parse_error=str(exc),
+            status="empty_response",
+        )
+        result = _manual_result(reason, trace)
     except Exception as exc:
         reason = f"{PARSE_ERROR_REASON}：{type(exc).__name__}: {exc}"
         trace = build_llm_trace(
@@ -77,18 +92,14 @@ def audit_szysfyxrghj(subject: AuditSubject, llm_client: JsonLlmClient | None) -
             status="parse_error",
         )
         result = _manual_result(reason, trace)
-    return build_findings(result, audit_input)
+    return _build_findings(result, audit_input)
 
 
 def build_audit_input(payload: dict[str, Any], meta: dict[str, Any]) -> dict[str, Any]:
-    kcmb_data = _build_kcmb_data(payload)
-    jxap_data = _build_jxap_data(payload)
-    meta_context = build_meta_context(meta, kcmb_data, jxap_data)
+    kcmb_data = build_kcmb_audit_data(payload, include_all_goals=False)
+    jxap_data = build_jxap_audit_data(payload)
     return {
-        "audit_subject": {
-            "dimension": DIMENSION,
-            "label": DIMENSION_LABEL,
-        },
+        "audit_subject": {"dimension": DIMENSION, "label": DIMENSION_LABEL},
         "payload_data": {
             "kcmb": {
                 "payload_paths": ["payload.kcmb.szmb", "payload.kcmb.mbgs", "payload.kcmb.kzzd"],
@@ -99,17 +110,17 @@ def build_audit_input(payload: dict[str, Any], meta: dict[str, Any]) -> dict[str
                     "payload.jxap.tm[].szyqjxx",
                     "payload.jxap.tm[].sknr",
                     "payload.jxap.tm[].skfs",
-                    "payload.jxap.tm[].zy",
+                    "payload.jxap.tm[].kzzd",
                     "payload.jxap.apgs",
                 ],
                 "data": jxap_data,
             },
         },
-        "meta_context": meta_context,
+        "meta_context": _build_meta_context(meta, kcmb_data, jxap_data),
     }
 
 
-def build_meta_context(meta: dict[str, Any], kcmb_data: dict[str, Any], jxap_data: dict[str, Any]) -> dict[str, Any]:
+def _build_meta_context(meta: dict[str, Any], kcmb_data: dict[str, Any], jxap_data: dict[str, Any]) -> dict[str, Any]:
     warnings = _relevant_warnings(meta)
     return {
         "fallback_flags": {
@@ -117,7 +128,7 @@ def build_meta_context(meta: dict[str, Any], kcmb_data: dict[str, Any], jxap_dat
             "jxap_needs_meta": _arrangement_needs_meta(jxap_data, warnings),
         },
         "extraction_warnings": warnings,
-        "raw_text_segments": extract_raw_text_segments(meta),
+        "raw_text_segments": _extract_raw_text_segments(meta),
         "notes": [
             "meta_context 只作为兜底辅助证据，不回写 payload。",
             "如果结构化字段为空但 meta 原文疑似存在相关内容，需复核抽取。",
@@ -125,90 +136,136 @@ def build_meta_context(meta: dict[str, Any], kcmb_data: dict[str, Any], jxap_dat
     }
 
 
-def parse_llm_json(text: str) -> dict[str, Any]:
-    cleaned = str(text or "").strip()
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?", "", cleaned, flags=re.I).strip()
-        cleaned = re.sub(r"```$", "", cleaned).strip()
-    parsed = json.loads(cleaned)
-    if not isinstance(parsed, dict):
-        raise ValueError("LLM result is not a JSON object")
-    return parsed
+def _extract_raw_text_segments(meta: dict[str, Any]) -> list[dict[str, Any]]:
+    section_hints = GOAL_SECTION_HINTS + ARRANGEMENT_SECTION_HINTS
+    segments = extract_source_keyword_segments(
+        meta,
+        section_hints,
+        accept_snippet=lambda text: _has_ideology_keyword(text),
+    )
+    if len(segments) >= 12:
+        return segments[:12]
+    extra = extract_source_keyword_segments(meta, IDEOLOGY_KEYWORDS)
+    seen = {(item["source_path"], item["section_hint"], item["text"]) for item in segments}
+    for item in extra:
+        key = (item["source_path"], item["section_hint"], item["text"])
+        if key not in seen:
+            seen.add(key)
+            segments.append(item)
+        if len(segments) >= 12:
+            break
+    return segments
 
 
-def normalize_llm_result(result: dict[str, Any], llm_trace: dict[str, Any] | None = None) -> dict[str, Any]:
+def _build_prompt(audit_input: dict[str, Any]) -> str:
+    input_json = json.dumps(audit_input, ensure_ascii=False, indent=2)
+    return f"""你是课程方案审核专家。请审核“是否将思政元素有效融入各环节”。
+
+只能依据输入 JSON 判断，不得臆测未出现的信息。
+payload_data 是结构化抽取结果，是主体证据。
+meta_context 是辅助证据，只能在 content_layout 为 empty 或抽取明显不完整时参考。
+如果 meta_context 中有相关原文但 content_layout 为 empty，应指出“结构化字段为空但原文疑似存在相关内容，需复核抽取”。
+不要把 meta 中孤立出现的政策关键词直接当作通过证据。
+
+{CONTENT_LAYOUT_RULES}
+
+审核维度：是否将思政元素有效融入各环节
+
+审核要求：
+1. 课程目标中应包含明确的思政目标，能够体现立德树人、价值引领、责任感、使命感、家国情怀、职业伦理、社会责任等内容。
+2. 教学安排中应体现思政元素融入，并且思政元素应与具体教学内容、周次、章节、知识点、案例、讨论、实践或教学方法发生关联。
+3. 课程目标中的思政目标与教学安排中的思政融入应能形成呼应，不能目标里有思政但教学安排没有落地，也不能教学安排零散出现思政词但课程目标没有对应目标。
+4. 不审核预期教学成效。
+
+判断规则：
+1. 思政目标明确，且教学安排中有具体、有效、可对应教学环节的思政融入，result 写“是”。
+2. content_layout 为 empty，或表述笼统、只有口号、无法与教学环节关联时，result 写“否”。
+3. table_only / goals_only 时 apgs 或 mbgs 为空不算缺失，不得因此判否。
+4. result 为“否”时 reasons 必须填写中文具体原因，不能只写“不符合要求”“内容不足”。
+5. 不要因为出现“思政”“立德树人”“价值引领”等少量关键词就直接判通过，要判断是否具体融入课程目标和教学安排。
+6. evidence_paths 必须引用输入 JSON 中实际存在的路径。
+7. suggestion 必须给出可执行修改建议。
+8. 输出必须是严格 JSON，不要输出 Markdown。
+9. reasons 和 checks.reason 面向甲方展示，不得输出字段 key、JSON 路径或内部代码名，例如 szmb、jxap、khfsb、kcyq、payload、payload_data；应改写为思政目标、教学安排、考核方式、课程要求、结构化抽取结果等中文业务名称。
+
+输入 JSON：
+{input_json}
+
+请输出严格 JSON：
+{{
+  "dimension": "szysfyxrghj",
+  "label": "是否将思政元素有效融入各环节",
+  "result": "是或否",
+  "reasons": [],
+  "checks": {{
+    "has_ideological_goal": {{"result": "是或否", "reason": "", "evidence_paths": []}},
+    "has_arrangement_integration": {{"result": "是或否", "reason": "", "evidence_paths": []}},
+    "is_effectively_integrated": {{"result": "是或否", "reason": "", "evidence_paths": []}}
+  }},
+  "evidence_paths": [],
+  "suggestion": ""
+}}
+"""
+
+
+def _normalize_llm_result(result: dict[str, Any], llm_trace: dict[str, Any] | None = None) -> dict[str, Any]:
     checks = _normalize_checks(result.get("checks"))
-    normalized = {"dimension": DIMENSION, "label": str(result.get("label") or DIMENSION_LABEL), "result": _result_value(result.get("result")), "reasons": _string_list(result.get("reasons")), "checks": checks, "evidence_paths": _string_list(result.get("evidence_paths")), "suggestion": str(result.get("suggestion") or ""), "llm_trace": llm_trace or _as_dict(result.get("llm_trace"))}
+    normalized = {
+        "dimension": DIMENSION,
+        "label": str(result.get("label") or DIMENSION_LABEL),
+        "result": result_value(result.get("result")),
+        "reasons": [clean_customer_reason(item) for item in string_list(result.get("reasons"))],
+        "checks": checks,
+        "evidence_paths": string_list(result.get("evidence_paths")),
+        "suggestion": str(result.get("suggestion") or ""),
+        "llm_trace": llm_trace or as_dict(result.get("llm_trace")),
+    }
     if any(check["result"] == NO for check in checks.values()):
         normalized["result"] = NO
     for check_key, check in checks.items():
         if check["result"] == NO and not check["reason"]:
-            check["reason"] = f"{_check_label(check_key)}\u672a\u901a\u8fc7\uff0c\u6a21\u578b\u672a\u7ed9\u51fa\u5177\u4f53\u539f\u56e0\uff0c\u9700\u4eba\u5de5\u590d\u6838"
+            check["reason"] = f"{_check_label(check_key)}未通过，模型未给出具体原因，需人工复核"
     if normalized["result"] == NO:
-        normalized["reasons"] = _merge_reasons(normalized["reasons"], _check_reasons(checks)) or [FALLBACK_REASON]
+        normalized["reasons"] = merge_reasons(normalized["reasons"], _check_reasons(checks)) or [FALLBACK_REASON]
     return normalized
 
 
-def build_findings(result: dict[str, Any], audit_input: dict[str, Any]) -> tuple[SectionFinding, list[FieldFinding]]:
-    result = normalize_llm_result(result, _as_dict(result.get("llm_trace")))
+def _build_findings(result: dict[str, Any], audit_input: dict[str, Any]) -> tuple[SectionFinding, list[FieldFinding]]:
+    result = _normalize_llm_result(result, as_dict(result.get("llm_trace")))
     is_pass = result["result"] == YES
     status = PASS if is_pass else FAIL
-    reasons = _string_list(result.get("reasons"))
-    reason = "\uff1b".join(reasons)
+    reasons = string_list(result.get("reasons"))
+    reason = clean_customer_reason("；".join(reasons))
     evidence = {
         "evidence_paths": result["evidence_paths"],
         "checks": result["checks"],
         "meta_context_used": bool((audit_input.get("meta_context") or {}).get("raw_text_segments")),
         "fallback_flags": (audit_input.get("meta_context") or {}).get("fallback_flags") or {},
     }
-    section = SectionFinding(wd=DIMENSION, status=status, message=result["result"], evidence=evidence, suggestion=result["suggestion"] if not is_pass else "", details={"label": DIMENSION_LABEL, "result": result["result"], "reasons": reasons, "checks": result["checks"]}, pdfs="direct_llm", llm_trace=_as_dict(result.get("llm_trace")))
-    field = FieldFinding(section=DIMENSION, field=FIELD, path=f"llm.{DIMENSION}.{FIELD}", status=status, reason="" if is_pass else reason or FALLBACK_REASON, message=result["result"] if is_pass else reason or FALLBACK_REASON, expected={"requirement": DIMENSION_LABEL}, actual={"result": result["result"], "checks": result["checks"]}, evidence=evidence, suggestion=result["suggestion"] if not is_pass else "", llm_trace=_as_dict(result.get("llm_trace")))
+    section = SectionFinding(
+        wd=DIMENSION,
+        status=status,
+        message=result["result"],
+        evidence=evidence,
+        suggestion=result["suggestion"] if not is_pass else "",
+        details={"label": DIMENSION_LABEL, "result": result["result"], "reasons": reasons, "checks": result["checks"]},
+        pdfs="direct_llm",
+        llm_trace=as_dict(result.get("llm_trace")),
+    )
+    field = FieldFinding(
+        section=DIMENSION,
+        field=FIELD,
+        path=f"llm.{DIMENSION}.{FIELD}",
+        status=status,
+        reason="" if is_pass else reason or FALLBACK_REASON,
+        message=result["result"] if is_pass else reason or FALLBACK_REASON,
+        expected={"requirement": DIMENSION_LABEL},
+        actual={"result": result["result"], "checks": result["checks"]},
+        evidence=evidence,
+        suggestion=result["suggestion"] if not is_pass else "",
+        llm_trace=as_dict(result.get("llm_trace")),
+    )
     return section, [field]
-
-
-def extract_raw_text_segments(meta: dict[str, Any], *, max_segments: int = 12, window: int = 320) -> list[dict[str, Any]]:
-    section_hints = GOAL_SECTION_HINTS + ARRANGEMENT_SECTION_HINTS
-    segments: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, int]] = set()
-    for source in _meta_text_sources(meta):
-        text = source["text"]
-        for hint in section_hints:
-            for match in re.finditer(re.escape(hint), text):
-                start = max(0, match.start() - window)
-                end = min(len(text), match.end() + window)
-                snippet = _compact_text(text[start:end])
-                if not _has_ideology_keyword(snippet):
-                    continue
-                key = (source["source_path"], hint, start)
-                if snippet and key not in seen:
-                    seen.add(key)
-                    segments.append(
-                        {
-                            "source_path": source["source_path"],
-                            "section_hint": hint,
-                            "text": snippet,
-                        }
-                    )
-                if len(segments) >= max_segments:
-                    return segments
-        for keyword in IDEOLOGY_KEYWORDS:
-            for match in re.finditer(re.escape(keyword), text):
-                start = max(0, match.start() - window)
-                end = min(len(text), match.end() + window)
-                snippet = _compact_text(text[start:end])
-                key = (source["source_path"], keyword, start)
-                if snippet and key not in seen:
-                    seen.add(key)
-                    segments.append(
-                        {
-                            "source_path": source["source_path"],
-                            "section_hint": keyword,
-                            "text": snippet,
-                        }
-                    )
-                if len(segments) >= max_segments:
-                    return segments
-    return segments
 
 
 def _manual_result(reason: str, llm_trace: dict[str, Any]) -> dict[str, Any]:
@@ -223,7 +280,7 @@ def _manual_result(reason: str, llm_trace: dict[str, Any]) -> dict[str, Any]:
             "is_effectively_integrated": {"result": NO, "reason": reason, "evidence_paths": []},
         },
         "evidence_paths": [],
-        "suggestion": "\u914d\u7f6e LLM \u540e\u91cd\u65b0\u5ba1\u6838\uff0c\u6216\u8fdb\u884c\u4eba\u5de5\u590d\u6838\u3002",
+        "suggestion": MANUAL_REVIEW_SUGGESTION,
         "llm_trace": llm_trace,
     }
 
@@ -234,171 +291,66 @@ def _normalize_checks(value: Any) -> dict[str, dict[str, Any]]:
     for key in ("has_ideological_goal", "has_arrangement_integration", "is_effectively_integrated"):
         item = raw.get(key) if isinstance(raw.get(key), dict) else {}
         result[key] = {
-            "result": _result_value(item.get("result")),
-            "reason": str(item.get("reason") or "").strip(),
-            "evidence_paths": _string_list(item.get("evidence_paths")),
+            "result": result_value(item.get("result")),
+            "reason": clean_customer_reason(str(item.get("reason") or "").strip()),
+            "evidence_paths": string_list(item.get("evidence_paths")),
         }
     return result
 
 
-def _build_kcmb_data(payload: dict[str, Any]) -> dict[str, Any]:
-    kcmb = _as_dict(payload.get("kcmb"))
-    return {
-        "szmb": _exact_value(kcmb.get("szmb")),
-        "mbgs": _exact_value(kcmb.get("mbgs")),
-        "kzzd": _normalize_kzzd(kcmb.get("kzzd")),
-    }
-
-
-def _build_jxap_data(payload: dict[str, Any]) -> dict[str, Any]:
-    jxap = _as_dict(payload.get("jxap"))
-    rows = []
-    for row in _as_list(jxap.get("tm")):
-        item = _as_dict(row)
-        rows.append(
-            {
-                "zs": _exact_value(item.get("zs")),
-                "sknr": _exact_value(item.get("sknr")),
-                "skfs": _exact_value(item.get("skfs")),
-                "szyqjxx": _exact_value(item.get("szyqjxx")),
-                "zy": _exact_value(item.get("zy")),
-            }
-        )
-    return {"tm": rows, "apgs": _exact_value(jxap.get("apgs"))}
-
-
 def _relevant_warnings(meta: dict[str, Any]) -> list[dict[str, Any]]:
     result = []
-    for warning in _as_list(meta.get("extraction_warnings")):
-        item = _as_dict(warning)
-        section = _exact_value(item.get("section"))
-        field = _exact_value(item.get("field"))
-        path = _exact_value(item.get("path"))
+    for warning in as_list(meta.get("extraction_warnings")):
+        item = as_dict(warning)
+        section = exact_value(item.get("section"))
+        field = exact_value(item.get("field"))
+        path = exact_value(item.get("path"))
         if section in {"kcmb", "jxap"} or path.startswith("payload.kcmb") or path.startswith("payload.jxap") or field in {"szmb", "szyqjxx"}:
             result.append(item)
     return result
 
 
 def _goal_needs_meta(kcmb_data: dict[str, Any], warnings: list[dict[str, Any]]) -> bool:
-    text = _exact_value(kcmb_data.get("szmb"))
-    return len(text) < 8 or _looks_template_text(text) or any(_exact_value(item.get("section")) == "kcmb" for item in warnings)
+    layout = str(kcmb_data.get("content_layout") or "")
+    if layout == "overview_only":
+        return exact_value((kcmb_data.get("supplement") or {}).get("mbgs")) == ""
+    text = exact_value(kcmb_data.get("szmb"))
+    if layout in {"goals_only", "goals_with_supplement"} and len(text) >= 8 and not looks_template_text(text):
+        return any(exact_value(item.get("section")) == "kcmb" for item in warnings)
+    return len(text) < 8 or looks_template_text(text) or any(exact_value(item.get("section")) == "kcmb" for item in warnings)
 
 
 def _arrangement_needs_meta(jxap_data: dict[str, Any], warnings: list[dict[str, Any]]) -> bool:
-    rows = _as_list(jxap_data.get("tm"))
+    layout = str(jxap_data.get("content_layout") or "")
+    if layout == "overview_only":
+        return exact_value((jxap_data.get("supplement") or {}).get("apgs")) == ""
+    rows = as_list(jxap_data.get("tm"))
     if not rows:
-        return True
-    values = [_exact_value(_as_dict(row).get("szyqjxx")) for row in rows]
+        return layout == "empty"
+    values = [exact_value(as_dict(row).get("szyqjxx")) for row in rows]
     empty_count = sum(1 for value in values if not value)
     mostly_empty = empty_count >= max(1, len(values) // 2)
-    only_template = all((not value) or _looks_template_text(value) for value in values)
-    return mostly_empty or only_template or any(_exact_value(item.get("section")) == "jxap" for item in warnings)
-
-
-def _meta_text_sources(meta: dict[str, Any]) -> list[dict[str, str]]:
-    sources: list[dict[str, str]] = []
-    full_text = _exact_value(meta.get("full_text"))
-    if full_text:
-        sources.append({"source_path": "meta.full_text", "text": full_text})
-    for index, page in enumerate(_as_list(meta.get("raw_pages"))):
-        if isinstance(page, dict):
-            text = _exact_value(page.get("text") or page.get("content") or page.get("raw_text"))
-        else:
-            text = _exact_value(page)
-        if text:
-            sources.append({"source_path": f"meta.raw_pages[{index}]", "text": text})
-    for index, segment in enumerate(_as_list(meta.get("unmapped_segments"))):
-        if isinstance(segment, dict):
-            text = _exact_value(segment.get("text") or segment.get("content") or segment.get("snippet"))
-        else:
-            text = _exact_value(segment)
-        if text:
-            sources.append({"source_path": f"meta.unmapped_segments[{index}]", "text": text})
-    return sources
-
-
-def _result_value(value: Any) -> str:
-    text = str(value or "").strip().lower()
-    if text in {YES, "yes", "pass", "passed", "true", "1"} or text.startswith("\u93c4"):
-        return YES
-    return NO
-
-
-def _string_list(value: Any) -> list[str]:
-    if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
-    if isinstance(value, str) and value.strip():
-        return [value.strip()]
-    return []
-
-
-def _check_reasons(checks: dict[str, dict[str, Any]]) -> list[str]:
-    reasons = [str(item.get("reason") or "").strip() for item in checks.values() if item.get("result") == NO]
-    return _merge_reasons(reasons)
-
-
-def _merge_reasons(*groups: list[str]) -> list[str]:
-    seen: set[str] = set()
-    merged: list[str] = []
-    for group in groups:
-        for reason in group:
-            text = str(reason or "").strip()
-            if text and text not in seen:
-                seen.add(text)
-                merged.append(text)
-    return merged
-
-
-def _check_label(key: str) -> str:
-    labels = {
-        "has_ideological_goal": "\u601d\u653f\u76ee\u6807",
-        "has_arrangement_integration": "\u6559\u5b66\u5b89\u6392\u4e2d\u7684\u601d\u653f\u878d\u5165",
-        "is_effectively_integrated": "\u601d\u653f\u76ee\u6807\u4e0e\u6559\u5b66\u5b89\u6392\u7684\u547c\u5e94\u5173\u7cfb",
-    }
-    return labels.get(key, key)
-
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _as_list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
-def _exact_value(value: Any) -> str:
-    text = str(value or "")
-    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
-    return text.strip()
-
-
-def _normalize_kzzd(value: Any) -> dict[str, Any] | list[Any] | str:
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, list):
-        return value
-    return _exact_value(value)
-
-
-def _compact_text(text: str) -> str:
-    return re.sub(r"\s+", " ", text or "").strip()
+    only_template = all((not value) or looks_template_text(value) for value in values)
+    return mostly_empty or only_template or any(exact_value(item.get("section")) == "jxap" for item in warnings)
 
 
 def _has_ideology_keyword(text: str) -> bool:
     return any(keyword in text for keyword in IDEOLOGY_KEYWORDS)
 
 
-def _looks_template_text(text: str) -> bool:
-    compact = _compact_text(text)
-    if not compact:
-        return True
-    placeholders = (
-        "\u8bf7\u586b\u5199",
-        "\u5f85\u586b\u5199",
-        "\u65e0",
-        "N/A",
-        "NA",
-    )
-    return compact in placeholders or len(compact) < 4
+def _check_reasons(checks: dict[str, dict[str, Any]]) -> list[str]:
+    reasons = [str(item.get("reason") or "").strip() for item in checks.values() if item.get("result") == NO]
+    return merge_reasons(reasons)
+
+
+def _check_label(key: str) -> str:
+    labels = {
+        "has_ideological_goal": "思政目标",
+        "has_arrangement_integration": "教学安排中的思政融入",
+        "is_effectively_integrated": "思政目标与教学安排的呼应关系",
+    }
+    return labels.get(key, key)
+
+
 
 

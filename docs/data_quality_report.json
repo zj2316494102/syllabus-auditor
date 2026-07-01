@@ -1,0 +1,189 @@
+{
+  "generated_at": "2026-06-29 12:43 UTC",
+  "total": 647,
+  "mineru_ok": 647,
+  "pdf_ok": 0,
+  "has_pdf_compare": false,
+  "db_rows": 647,
+  "status": {
+    "partial": 583,
+    "success": 64
+  },
+  "section_stats": {
+    "jcxx_kcbh": {
+      "mineru": 588,
+      "md": 592,
+      "db": 580,
+      "db_strict": 580,
+      "pdf": 0,
+      "mineru_md": 588,
+      "mineru_md_db": 580,
+      "mineru_md_db_strict": 580,
+      "pdf_mineru": 0,
+      "md_only": 4,
+      "mineru_only": 0
+    },
+    "kcmb": {
+      "mineru": 635,
+      "md": 637,
+      "db": 628,
+      "db_strict": 583,
+      "pdf": 0,
+      "mineru_md": 634,
+      "mineru_md_db": 625,
+      "mineru_md_db_strict": 581,
+      "pdf_mineru": 0,
+      "md_only": 3,
+      "mineru_only": 1
+    },
+    "jxnr": {
+      "mineru": 632,
+      "md": 636,
+      "db": 614,
+      "db_strict": 533,
+      "pdf": 0,
+      "mineru_md": 631,
+      "mineru_md_db": 613,
+      "mineru_md_db_strict": 532,
+      "pdf_mineru": 0,
+      "md_only": 5,
+      "mineru_only": 1
+    },
+    "jxap": {
+      "mineru": 625,
+      "md": 623,
+      "db": 615,
+      "db_strict": 527,
+      "pdf": 0,
+      "mineru_md": 622,
+      "mineru_md_db": 612,
+      "mineru_md_db_strict": 524,
+      "pdf_mineru": 0,
+      "md_only": 1,
+      "mineru_only": 3
+    },
+    "jxap_sz": {
+      "mineru": 516,
+      "md": 513,
+      "db": 513,
+      "db_strict": 513,
+      "pdf": 0,
+      "mineru_md": 513,
+      "mineru_md_db": 513,
+      "mineru_md_db_strict": 513,
+      "pdf_mineru": 0,
+      "md_only": 0,
+      "mineru_only": 3
+    },
+    "khfsb": {
+      "mineru": 147,
+      "md": 149,
+      "db": 149,
+      "db_strict": 128,
+      "pdf": 0,
+      "mineru_md": 147,
+      "mineru_md_db": 147,
+      "mineru_md_db_strict": 128,
+      "pdf_mineru": 0,
+      "md_only": 2,
+      "mineru_only": 0
+    }
+  },
+  "warning_class": {
+    "待核(MinerU有内容)": 543,
+    "源文档真缺": 355,
+    "待核(结构模糊)": 110,
+    "解析误报": 15,
+    "MinerU→MD丢失": 20
+  },
+  "warning_by_field": {
+    "考核方式条目": {
+      "待核(MinerU有内容)": 487,
+      "待核(结构模糊)": 11
+    },
+    "课程编号": {
+      "源文档真缺": 59,
+      "MinerU→MD丢失": 8
+    },
+    "中文课程名称": {
+      "源文档真缺": 14
+    },
+    "英文课程名称": {
+      "源文档真缺": 69
+    },
+    "开课（院）系": {
+      "源文档真缺": 68
+    },
+    "任课教师姓名": {
+      "源文档真缺": 74
+    },
+    "思政目标": {
+      "源文档真缺": 23,
+      "MinerU→MD丢失": 1
+    },
+    "能力目标": {
+      "源文档真缺": 18,
+      "MinerU→MD丢失": 5
+    },
+    "知识目标": {
+      "源文档真缺": 17,
+      "MinerU→MD丢失": 4
+    },
+    "教学内容条目": {
+      "待核(结构模糊)": 15,
+      "待核(MinerU有内容)": 14
+    },
+    "教学安排条目": {
+      "待核(结构模糊)": 22,
+      "待核(MinerU有内容)": 10
+    },
+    "课程要求": {
+      "待核(结构模糊)": 23,
+      "待核(MinerU有内容)": 22
+    },
+    "考察内容": {
+      "解析误报": 2,
+      "待核(结构模糊)": 7,
+      "源文档真缺": 6
+    },
+    "思政元素的融入和预期教学成效": {
+      "待核(结构模糊)": 13,
+      "解析误报": 2
+    },
+    "序号": {
+      "待核(MinerU有内容)": 1,
+      "解析误报": 5,
+      "待核(结构模糊)": 1
+    },
+    "课程/周次": {
+      "解析误报": 2,
+      "待核(MinerU有内容)": 9,
+      "MinerU→MD丢失": 1
+    },
+    "考察方式": {
+      "待核(结构模糊)": 9,
+      "源文档真缺": 5
+    },
+    "占比": {
+      "待核(结构模糊)": 4,
+      "源文档真缺": 2
+    },
+    "学时": {
+      "MinerU→MD丢失": 1,
+      "待核(结构模糊)": 1,
+      "解析误报": 1
+    },
+    "授课内容": {
+      "待核(结构模糊)": 3
+    },
+    "授课方式": {
+      "待核(结构模糊)": 1
+    },
+    "主题": {
+      "解析误报": 2
+    },
+    "知识点": {
+      "解析误报": 1
+    }
+  }
+}

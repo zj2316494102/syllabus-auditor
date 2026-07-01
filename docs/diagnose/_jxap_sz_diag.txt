@@ -1,0 +1,39 @@
+﻿md_ok db_no count: 106
+
+reason breakdown: {'no_jxap_rows': 94, 'extract_warning_on_sz_field': 12}
+
+
+
+md jxap_sz ok: 616, db jxap_sz ok: 510, gap: 106
+
+gap with jxap rows but no szyqjxx: 12
+
+no_jxap_rows cases with 思政 in apgs: 78
+
+no_jxap_rows cases with any apgs text: 85
+
+
+
+examples per reason:
+
+
+
+== no_jxap_rows (94) ==
+
+  {'stem': '0263003049-《税务筹划专题》-吕敏-春季学期-完整版', 'reason': 'no_jxap_rows', 'jxap_rows': 0, 'sknr_with_sz': 0, 'sz_warnings': 0}
+
+  {'stem': '2026 - 附件3： 课程实施方案-公共经济学研究（金浩）_完整', 'reason': 'no_jxap_rows', 'jxap_rows': 0, 'sknr_with_sz': 0, 'sz_warnings': 0}
+
+  {'stem': '2026-05 课程实施方案（高级社会工作实践督导（健康社会工作）', 'reason': 'no_jxap_rows', 'jxap_rows': 0, 'sknr_with_sz': 0, 'sz_warnings': 0}
+
+
+
+== extract_warning_on_sz_field (12) ==
+
+  {'stem': '2025-2026-2新时代文旅产业发展重大战略与政策研究（博士）-西南财经大学研究生课程教学实施方案', 'reason': 'extract_warning_on_sz_field', 'jxap_rows': 4, 'sknr_with_sz': 0, 'sz_warnings': 1}
+
+  {'stem': '中级发展经济学教学大纲', 'reason': 'extract_warning_on_sz_field', 'jxap_rows': 8, 'sknr_with_sz': 0, 'sz_warnings': 1}
+
+  {'stem': '发展政治经济学', 'reason': 'extract_warning_on_sz_field', 'jxap_rows': 1, 'sknr_with_sz': 0, 'sz_warnings': 2}
+
+

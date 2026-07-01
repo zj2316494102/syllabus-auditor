@@ -1,3 +1,5 @@
+"""审核运行与结果持久化（audit_runs / audit_run_metrics 等表）。"""
+
 from __future__ import annotations
 
 import json
@@ -15,6 +17,7 @@ from syllabus_auditor.core.audit import (
 )
 from syllabus_auditor.core.audit_labels import audit_wd_label
 from syllabus_auditor.core.db.connection import build_dsn
+from syllabus_auditor.shared.reason_text import clean_customer_reason, clean_customer_reasons
 
 
 CORE_AUDIT_DIMENSIONS = (
@@ -70,9 +73,16 @@ class AuditStore:
             )
         return subjects
 
-    def match_course(self, subject: AuditSubject) -> CourseMatch:
+    def match_course(self, subject: AuditSubject, duplicate_course_codes: set[str] | None = None) -> CourseMatch:
+        duplicate_course_codes = duplicate_course_codes or set()
         jcxx = subject.payload.get("jcxx") if isinstance(subject.payload.get("jcxx"), dict) else {}
-        kcbh = str(jcxx.get("kcbh") or subject.course_code or "").strip()
+        kcbh = _subject_course_code(subject)
+        duplicate_kcbh = bool(kcbh and kcbh in duplicate_course_codes)
+        if kcbh and duplicate_kcbh:
+            match = self._match_duplicate_kcbh_subject(subject, kcbh, jcxx)
+            if match:
+                return match
+
         if kcbh:
             row = self.get_course_by_kcbh(kcbh)
             if row:
@@ -105,6 +115,50 @@ class AuditStore:
             reasons.append("无法从 PDF 或文件路径中取得可用于匹配课程库的信息")
         return CourseMatch(status="not_found", method="not_found", query=source_name or pdf_name or kcbh, reasons=reasons)
 
+    def _match_duplicate_kcbh_subject(self, subject: AuditSubject, kcbh: str, jcxx: dict[str, Any]) -> CourseMatch | None:
+        metadata = {"duplicate_kcbh": True, "original_kcbh": kcbh, "csv_kcbh_source": "original"}
+        duplicate_reason = "本轮审核中存在多个 PDF 填写同一课程编号，已启用课程名称和文件名辅助定位审核对照课程。"
+        pdf_name = str(jcxx.get("zwkcmc") or "").strip()
+        if pdf_name:
+            match = self._match_course_by_name(pdf_name, method="matched_by_pdf_name_for_duplicate_kcbh")
+            if match.status == "matched":
+                matched_kcbh = str((match.course_row or {}).get("kcbh") or "").strip()
+                match.reasons = [duplicate_reason]
+                match.metadata = {
+                    **metadata,
+                    "duplicate_kcbh_resolved": True,
+                    "duplicate_kcbh_resolution_source": "pdf_course_name",
+                    "csv_kcbh": matched_kcbh,
+                    "csv_kcbh_source": "duplicate_kcbh_pdf_name",
+                }
+                return match
+
+        source_name = extract_course_name_from_source_path(subject.source_path)
+        if source_name:
+            match = self._match_course_by_name(source_name, method="matched_by_source_path_for_duplicate_kcbh")
+            if match.status == "matched":
+                matched_kcbh = str((match.course_row or {}).get("kcbh") or "").strip()
+                match.reasons = [duplicate_reason]
+                match.metadata = {
+                    **metadata,
+                    "duplicate_kcbh_resolved": True,
+                    "duplicate_kcbh_resolution_source": "source_path",
+                    "csv_kcbh": matched_kcbh,
+                    "csv_kcbh_source": "duplicate_kcbh_source_path",
+                }
+                return match
+
+        row = self.get_course_by_kcbh(kcbh)
+        if row:
+            return CourseMatch(
+                status="matched",
+                method="matched_by_kcbh_after_duplicate_unresolved",
+                query=kcbh,
+                course_row=row,
+                reasons=["本轮审核中存在多个 PDF 填写同一课程编号，但未能通过课程名称或文件名唯一定位其它课程，已按原课程编号进行审核。"],
+                metadata={**metadata, "duplicate_kcbh_resolved": False, "csv_kcbh": kcbh},
+            )
+        return None
     def get_course_by_kcbh(self, kcbh: str) -> dict[str, Any] | None:
         if not kcbh.strip():
             return None
@@ -199,8 +253,66 @@ class AuditStore:
             conn.commit()
         return int(row[0])
 
+    def resume_run(self, *, run_id: int, course_total: int, skipped_count: int, pending_count: int) -> None:
+        with psycopg.connect(build_dsn()) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT status::text
+                    FROM audit_runs
+                    WHERE id = %s
+                    """,
+                    (run_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    raise ValueError(f"audit run {run_id} 不存在，无法续跑")
+                status = str(row[0] or "")
+                if status == "completed":
+                    raise ValueError(f"audit run {run_id} 已完成，不能续跑；如需重审请新建审核轮次")
+                if status not in {"failed", "running", "created"}:
+                    raise ValueError(f"audit run {run_id} 当前状态为 {status}，不能续跑")
+                cur.execute(
+                    """
+                    UPDATE audit_runs
+                    SET status = 'running',
+                        course_total = %s,
+                        error_message = NULL,
+                        completed_at = NULL,
+                        summary = COALESCE(summary, '{}'::jsonb) || %s::jsonb
+                    WHERE id = %s
+                    """,
+                    (
+                        course_total,
+                        json.dumps(
+                            {
+                                "resume": {
+                                    "skipped_count": skipped_count,
+                                    "pending_count": pending_count,
+                                }
+                            },
+                            ensure_ascii=False,
+                        ),
+                        run_id,
+                    ),
+                )
+            conn.commit()
+
+    def completed_subject_keys(self, *, run_id: int) -> set[str]:
+        with psycopg.connect(build_dsn()) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT subject_key
+                    FROM audit_results
+                    WHERE run_id = %s
+                    """,
+                    (run_id,),
+                )
+                return {str(row[0]) for row in cur.fetchall() if row[0]}
     def save_subject_audit(self, *, run_id: int, audit: SubjectAudit) -> int:
         subject = audit.subject
+        subject_kcbh = _subject_course_code(subject)
         dimension_findings = [
             finding
             for finding in audit.section_findings
@@ -208,6 +320,21 @@ class AuditStore:
         ]
         with psycopg.connect(build_dsn()) as conn:
             with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id
+                    FROM audit_results
+                    WHERE run_id = %s AND subject_key = %s
+                    LIMIT 1
+                    """,
+                    (run_id, subject.subject_key),
+                )
+                existing = cur.fetchone()
+                if existing:
+                    raise ValueError(
+                        f"audit result 已存在：run_id={run_id}, subject_key={subject.subject_key}；"
+                        "如需断点续跑，请使用 --resume-run-id 跳过已完成结果"
+                    )
                 cur.execute(
                     """
                     INSERT INTO audit_results (
@@ -224,7 +351,7 @@ class AuditStore:
                     (
                         run_id,
                         subject.subject_key,
-                        subject.course_code,
+                        subject_kcbh,
                         subject.extraction_id,
                         subject.source_path,
                         audit.overall_status,
@@ -254,18 +381,18 @@ class AuditStore:
                         (
                             run_id,
                             result_id,
-                            subject.course_code,
+                            subject_kcbh,
                             subject.subject_key,
                             finding.section,
                             finding.field,
                             finding.path,
                             finding.status,
-                            finding.reason,
-                            finding.message,
+                            clean_customer_reason(finding.reason),
+                            clean_customer_reason(finding.message),
                             _json_dump(finding.expected),
                             _json_dump(finding.actual),
                             _json_dump(finding.evidence),
-                            finding.suggestion,
+                            clean_customer_reason(finding.suggestion),
                             _json_dump(finding.llm_trace),
                         )
                         for finding in audit.field_findings
@@ -286,14 +413,14 @@ class AuditStore:
                         (
                             run_id,
                             result_id,
-                            subject.course_code,
+                            subject_kcbh,
                             audit_wd_label(finding.wd),
                             finding.pdfs,
                             finding.status,
-                            finding.message,
+                            clean_customer_reason(finding.message),
                             _json_dump(finding.evidence),
-                            finding.suggestion,
-                            _json_dump(finding.details),
+                            clean_customer_reason(finding.suggestion),
+                            _json_dump(clean_customer_reasons(finding.details)),
                             _json_dump(finding.llm_trace),
                         )
                         for finding in dimension_findings
@@ -305,6 +432,12 @@ class AuditStore:
     def complete_run(self, summary: AuditRunSummary) -> None:
         with psycopg.connect(build_dsn()) as conn:
             with conn.cursor() as cur:
+                status_counts = self._run_status_counts(cur, summary.run_id)
+                course_done = sum(status_counts.values())
+                summary.pass_count = status_counts.get("pass", 0)
+                summary.fail_count = status_counts.get("fail", 0)
+                summary.partial_count = status_counts.get("partial", 0)
+                summary.error_count = status_counts.get("error", 0)
                 metrics = self._compute_run_metrics(cur, summary.run_id)
                 self._save_run_metrics(cur, summary.run_id, metrics)
                 cur.execute(
@@ -312,12 +445,12 @@ class AuditStore:
                     UPDATE audit_runs
                     SET status = 'completed',
                         course_done = %s,
-                        summary = %s::jsonb,
+                        summary = COALESCE(summary, '{}'::jsonb) || %s::jsonb,
                         completed_at = NOW()
                     WHERE id = %s
                     """,
                     (
-                        summary.total,
+                        course_done,
                         json.dumps(
                             {
                                 "pass_count": summary.pass_count,
@@ -325,6 +458,7 @@ class AuditStore:
                                 "partial_count": summary.partial_count,
                                 "error_count": summary.error_count,
                                 "skipped_count": summary.skipped_count,
+                                "course_done": course_done,
                                 "metrics": metrics,
                             },
                             ensure_ascii=False,
@@ -334,6 +468,17 @@ class AuditStore:
                 )
             conn.commit()
 
+    def _run_status_counts(self, cur: Any, run_id: int) -> dict[str, int]:
+        cur.execute(
+            """
+            SELECT overall_status::text, COUNT(*)
+            FROM audit_results
+            WHERE run_id = %s
+            GROUP BY overall_status::text
+            """,
+            (run_id,),
+        )
+        return {str(row[0]): int(row[1] or 0) for row in cur.fetchall()}
     def _compute_run_metrics(self, cur: Any, run_id: int) -> dict[str, Any]:
         total_courses = self._scalar(cur, "SELECT COUNT(*) FROM audit_results WHERE run_id = %s", (run_id,))
         dimension_count = len(CORE_AUDIT_DIMENSIONS)
@@ -449,7 +594,7 @@ class AuditStore:
             FROM audit_findings af
             CROSS JOIN LATERAL jsonb_array_elements(COALESCE(af.llm_trace->'calls', '[]'::jsonb)) call
             WHERE af.run_id = %s
-              AND COALESCE(call->>'status', '') IN ('parse_error', 'no_llm')
+              AND COALESCE(call->>'status', '') IN ('parse_error', 'no_llm', 'empty_response')
             GROUP BY COALESCE(call->>'status', '')
             """,
             (run_id,),
@@ -507,6 +652,9 @@ class AuditStore:
                 )
             conn.commit()
 
+def _subject_course_code(subject: AuditSubject) -> str:
+    jcxx = subject.payload.get("jcxx") if isinstance(subject.payload.get("jcxx"), dict) else {}
+    return str(jcxx.get("kcbh") or subject.course_code or "").strip()
 
 def _json_object(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):

@@ -174,8 +174,8 @@ DROP INDEX IF EXISTS public.idx_audit_results_jxnrsfyxspp;
 ALTER TABLE public.audit_results DROP COLUMN IF EXISTS jxnrsfyxspp;
 UPDATE public.audit_results
 SET subject_key = CASE
-    WHEN COALESCE(kcbh, '') <> '' THEN 'kcbh:' || kcbh
     WHEN extraction_id IS NOT NULL THEN 'extraction:' || extraction_id::text
+    WHEN COALESCE(source_path, '') <> '' THEN 'source:' || md5(source_path)
     ELSE 'audit_result:' || id::text
 END
 WHERE COALESCE(subject_key, '') = '';

@@ -1,3 +1,5 @@
+"""抽取与准备流程的数据类定义。"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -16,7 +18,6 @@ class ExtractionRaw:
     teaching_content: list[dict[str, str]] = field(default_factory=list)
     course_schedule: list[dict[str, str]] = field(default_factory=list)
     assessment_rows: list[dict[str, str]] = field(default_factory=list)
-    course_requirements: list[dict[str, Any]] = field(default_factory=list)
     course_goal_extras: dict[str, str] = field(default_factory=dict)
     extraction_warnings: list[dict[str, Any]] = field(default_factory=list)
     section_extraction: dict[str, Any] = field(default_factory=dict)

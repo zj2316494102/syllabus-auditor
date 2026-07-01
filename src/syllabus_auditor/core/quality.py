@@ -1,10 +1,14 @@
+"""入库前 payload/meta 清洗、完整性告警生成与 JSONB 安全化。"""
+
 from __future__ import annotations
 
 import re
 from copy import deepcopy
 from typing import Any
 
-from config import load_project_config
+from syllabus_auditor.shared.config import load_project_config
+from syllabus_auditor.core.content_layout import section_content_layout
+from syllabus_auditor.core.extractors.mineru import downgrade_warnings_for_ocr
 
 
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
@@ -33,14 +37,6 @@ FIELD_LABELS = {
         "tm": "考核方式条目",
     },
 }
-
-OVERVIEW_KEYS = {
-    "jxnr": ("nrgs",),
-    "jxap": ("apgs",),
-    "khfsb": ("khgs",),
-    "kcmb": ("mbgs",),
-}
-
 
 def _default_severity(reason: str) -> str:
     mapping = load_project_config().get("warning_severity", {})
@@ -72,17 +68,6 @@ def _warning(
     if detail:
         warning["detail"] = detail
     return warning
-
-
-def _has_overview_substitute(payload: dict[str, Any], section: str) -> bool:
-    block = payload.get(section) or {}
-    if not isinstance(block, dict):
-        return False
-    for key in OVERVIEW_KEYS.get(section, ()):
-        value = block.get(key)
-        if isinstance(value, str) and value.strip():
-            return True
-    return False
 
 
 def normalize_warning_severities(warnings: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -152,6 +137,7 @@ def _append_missing_field(
     label: str,
     path: str,
     severity: str = "error",
+    detail: str = "",
 ) -> None:
     warnings.append(
         _warning(
@@ -161,8 +147,37 @@ def _append_missing_field(
             reason="missing_field",
             path=path,
             severity=severity,
+            detail=detail,
         )
     )
+
+
+def _append_table_row_missing_fields(
+    warnings: list[dict[str, Any]],
+    *,
+    section: str,
+    rows: list[dict[str, Any]],
+    field_specs: tuple[tuple[str, str], ...],
+    severity: str,
+) -> None:
+    """表格行内字段：同一 section 下每种列字段至多报一条。"""
+    for field, label in field_specs:
+        empty_count = sum(1 for item in rows if _is_empty(item.get(field)))
+        if not empty_count:
+            continue
+        detail = f"共 {empty_count} 行缺少该字段" if empty_count > 1 else ""
+        _append_missing_field(
+            warnings,
+            section=section,
+            field=field,
+            label=label,
+            path=f"payload.{section}.tm[].{field}",
+            severity=severity,
+            detail=detail,
+        )
+
+
+CONTENT_SECTIONS = frozenset({"kcmb", "jxnr", "jxap", "khfsb"})
 
 
 def build_completeness_warnings(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -170,21 +185,36 @@ def build_completeness_warnings(payload: dict[str, Any]) -> list[dict[str, Any]]
 
     for section, fields in FIELD_LABELS.items():
         block = payload.get(section) or {}
+        layout = section_content_layout(section, block) if section in CONTENT_SECTIONS else ""
+
         for field, label in fields.items():
             value = block.get(field) if isinstance(block, dict) else None
             if not _is_empty(value):
                 continue
-            if field == "tm" and _has_overview_substitute(payload, section):
-                warnings.append(
-                    _warning(
-                        section=section,
-                        field=field,
-                        label=label,
-                        reason="overview_used_instead_of_table",
-                        path=f"payload.{section}.{field}",
-                        severity="info",
+            if field == "tm":
+                if layout == "overview_only":
+                    warnings.append(
+                        _warning(
+                            section=section,
+                            field=field,
+                            label=label,
+                            reason="overview_used_instead_of_table",
+                            path=f"payload.{section}.{field}",
+                            severity="info",
+                        )
                     )
-                )
+                elif layout == "empty":
+                    warnings.append(
+                        _warning(
+                            section=section,
+                            field=field,
+                            label=label,
+                            reason="empty_section",
+                            path=f"payload.{section}.{field}",
+                        )
+                    )
+                continue
+            if section == "kcmb" and layout == "overview_only":
                 continue
             reason = "empty_section" if field == "tm" else "missing_field"
             warnings.append(
@@ -197,62 +227,52 @@ def build_completeness_warnings(payload: dict[str, Any]) -> list[dict[str, Any]]
                 )
             )
 
-    jxnr_overview = _has_overview_substitute(payload, "jxnr")
-    for index, item in enumerate(((payload.get("jxnr") or {}).get("tm") or [])):
-        row_severity = "warn" if jxnr_overview else "error"
-        for field, label in (("xh", "序号"), ("zt", "主题"), ("zsd", "知识点"), ("xs", "学时")):
-            if _is_empty(item.get(field)):
-                _append_missing_field(
-                    warnings,
-                    section="jxnr",
-                    field=field,
-                    label=label,
-                    path=f"payload.jxnr.tm[{index}].{field}",
-                    severity=row_severity,
-                )
+    jxnr_block = payload.get("jxnr") or {}
+    jxnr_layout = section_content_layout("jxnr", jxnr_block)
+    jxnr_rows = (jxnr_block.get("tm") or []) if isinstance(jxnr_block, dict) else []
+    _append_table_row_missing_fields(
+        warnings,
+        section="jxnr",
+        rows=jxnr_rows,
+        field_specs=(("xh", "序号"), ("zt", "主题"), ("zsd", "知识点"), ("xs", "学时")),
+        severity="warn" if jxnr_layout == "overview_only" else "error",
+    )
 
-    jxap_overview = _has_overview_substitute(payload, "jxap")
-    for index, item in enumerate(((payload.get("jxap") or {}).get("tm") or [])):
-        row_severity = "warn" if jxap_overview else "error"
-        for field, label in (
+    jxap_block = payload.get("jxap") or {}
+    jxap_layout = section_content_layout("jxap", jxap_block)
+    jxap_rows = (jxap_block.get("tm") or []) if isinstance(jxap_block, dict) else []
+    _append_table_row_missing_fields(
+        warnings,
+        section="jxap",
+        rows=jxap_rows,
+        field_specs=(
             ("zs", "课程/周次"),
             ("sknr", "授课内容"),
             ("skfs", "授课方式"),
             ("szyqjxx", "思政元素的融入和预期教学成效"),
-        ):
-            if _is_empty(item.get(field)):
-                _append_missing_field(
-                    warnings,
-                    section="jxap",
-                    field=field,
-                    label=label,
-                    path=f"payload.jxap.tm[{index}].{field}",
-                    severity=row_severity,
-                )
+        ),
+        severity="warn" if jxap_layout == "overview_only" else "error",
+    )
 
-    khfsb_overview = _has_overview_substitute(payload, "khfsb")
-    for index, item in enumerate(((payload.get("khfsb") or {}).get("tm") or [])):
-        row_severity = "warn" if khfsb_overview else "error"
-        for field, label in (("ksxs", "考试形式"), ("kcnr", "考察内容"), ("kcfs", "考察方式"), ("zb", "占比")):
-            if _is_empty(item.get(field)):
-                _append_missing_field(
-                    warnings,
-                    section="khfsb",
-                    field=field,
-                    label=label,
-                    path=f"payload.khfsb.tm[{index}].{field}",
-                    severity=row_severity,
-                )
+    khfsb_block = payload.get("khfsb") or {}
+    khfsb_layout = section_content_layout("khfsb", khfsb_block)
+    khfsb_rows = (khfsb_block.get("tm") or []) if isinstance(khfsb_block, dict) else []
+    _append_table_row_missing_fields(
+        warnings,
+        section="khfsb",
+        rows=khfsb_rows,
+        field_specs=(("ksxs", "考试形式"), ("kcnr", "考察内容"), ("kcfs", "考察方式"), ("zb", "占比")),
+        severity="warn" if khfsb_layout == "overview_only" else "error",
+    )
 
-    kcyqb = payload.get("kcyqb") or {}
-    if _is_empty(payload.get("kcyq")) and _is_empty(kcyqb.get("tm")) and _is_empty(kcyqb.get("yqgs")):
+    if _is_empty(payload.get("kcyq")):
         warnings.append(
             _warning(
-                section="kcyqb",
-                field="tm",
+                section="kcyq",
+                field="content",
                 label="课程要求",
                 reason="empty_section",
-                path="payload.kcyqb.tm",
+                path="payload.kcyq",
             )
         )
 
@@ -274,5 +294,6 @@ def prepare_payload_and_meta_for_insert(
 
     existing_warnings.extend(payload_warnings)
     existing_warnings.extend(meta_warnings)
+    existing_warnings = downgrade_warnings_for_ocr(meta, existing_warnings)
     meta["extraction_warnings"] = normalize_warning_severities(existing_warnings)
     return payload, meta

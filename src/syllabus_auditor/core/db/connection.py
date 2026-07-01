@@ -1,3 +1,5 @@
+"""项目根目录定位与 PostgreSQL DSN 构建。"""
+
 from __future__ import annotations
 
 import os

@@ -1,0 +1,201 @@
+# 项目配置（LLM、路径、阈值、正则、打分、审核文案等可调项）
+# 领域字段映射等跟代码绑死的结构见 src/syllabus_auditor/shared/config/schema.py
+
+# ---------------- LLM 设置 ----------------
+# 密钥放在 .env；此处定义模型 profile 与默认选用项
+
+llms:
+  deepseek_v4_flash:
+    provider: openai_compatible
+    model_name_env: LLM_MODEL_NAME
+    api_key_env: LLM_API_KEY
+    base_url_env: LLM_BASE_URL
+    temperature: 0.0
+  deepseek_v4_pro:
+    provider: openai_compatible
+    model_name_env: DS_PRO_MODEL_NAME
+    api_key_env: DS_PRO_API_KEY
+    base_url_env: DS_PRO_BASE_URL
+    temperature: 0.0
+
+defaults:
+  active_llm: deepseek_v4_flash
+  system_prompt: |
+    你是严格输出 JSON 的课程方案审核专家。
+  response_format:
+    type: json_object
+  payload_schema_version: "1.0"
+
+# ---------------- 路径设置 ----------------
+paths:
+  data_pdf: data_pdf
+  data_md: data_md
+  mineru_raw_subdir: _mineru_raw
+  manifest_relpath: data_md/manifest/index.jsonl
+  quality_report_dir: docs
+  diagnose_output_dir: docs/diagnose
+
+# ---------------- 数据加载设置 ----------------
+loader:
+  excel_suffixes: [".xls", ".xlsx", ".xlsm", ".xlsb"]
+  pdf_suffix: ".pdf"
+  default_course_library_filename: 培养-课程库信息0616.xls
+
+# ---------------- 元数据设置 ----------------
+meta:
+  extractor_version: pdfplumber:0.11.0+pymupdf-fusion:0.1
+  unmapped_cn_fields: [课程模块, 职称, 学历]
+
+# ---------------- 抽取正则与阈值设置 ----------------
+extraction:
+  sequence_pattern: '(?:第)?\d+(?:\.\d+)?(?:[-－—~～至]\d+(?:\.\d+)?)?(?:周|次|讲|节|课时)?'
+  summary_row_markers: [课时总计, 学时总计, 总学时, 合计]
+  practice_line_pattern: '\d+\s*[（(]课程教授与实践(?:课)?[）)]'
+  label_normalize_pattern: '[\s:：；;，,、（）()【】\[\]《》<>“”\"''·\-—_]+'
+  title_regex_prefix: '(?:[（(]?[一二三四五六七八九十0-9]+[）)]?\s*[、.．-]?\s*)?'
+  title_regex_suffix: '(?:[与及和、][^\n]{0,12})?'
+  section_excerpt_max_len: 500
+  validated_text_default_min_len: 12
+  jcxx_regex:
+    - ['课程编号\s*[：:]\s*(\S+)', 课程编号]
+    - ['课程名称\s*[：:]\s*(.+?)(?:\n|课程\s*ID|$)', 中文课程名称]
+    - ['中文课程名称\s*[：:]\s*(.+?)(?:\n|英文课程名称|$)', 中文课程名称]
+    - ['英文课程名称\s*[：:]\s*(.+?)(?:\n|课程性质|$)', 英文课程名称]
+    - ['开课[（(]院[）)]系\s*[：:]\s*(.+?)(?:\n|中文课程名称|$)', 开课（院）系]
+    - ['任课教师姓名\s*[：:]\s*(.+?)(?:\n|教师工号|$)', 任课教师姓名]
+  section_anchors:
+    - ['（五）\s*教学安排', 教学安排]
+    - ['（四）\s*教学内容', 教学内容]
+    - ['（六）\s*课程要求', 课程要求]
+    - ['（八）\s*考核方式(?:及成绩构成)?', 考核方式]
+  teaching_content_line_pattern: '^\s*(\d+(?:\.\d+)?)\s*[、.．-]?\s+(.+?)\s+(\d+(?:\.\d+)?)\s*(?:学时)?\s*$'
+  course_schedule_line_pattern: '^\s*(?:第)?(\d+(?:\s*[-~～至,，、]\s*\d+)*)\s*(?:周|周次)?\s+(.+)$'
+  course_schedule_fallback_line_pattern: '^\s*(\d+)\s+(.+)$'
+  teaching_method_keywords: [讲授, 讨论, 案例, 实践, 翻转课堂, 实验]
+  requirement_line_pattern: '^\s*([\u4e00-\u9fa5]{2,8}要求)[:：]?\s*(.+)$'
+
+# ---------------- Payload 运行时设置 ----------------
+payload:
+  empty_markers: ["", 不填, 未填, 无, 暂无, 无特殊要求, 无特殊, none, null, n/a, na]
+  total_hours_patterns:
+    - '课时总计[：:]\s*(\d+)\s*学时'
+    - '学时总计[：:]\s*(\d+)\s*学时'
+    - '课时总计[：:]\s*学时\s*(\d+)'
+    - '总学时[：:]\s*(\d+)'
+
+# ---------------- 审核规则阈值设置 ----------------
+audit_rules:
+  suggestions_limit: 20
+  filename_noise_patterns:
+    - 课程方案完整版
+    - 课程方案
+    - 课程实施方案
+    - 教学大纲
+    - 完整版
+    - 最终版
+    - 修订版
+    - 新版
+  week_keywords: [周, 周次, 教学周, 授课周]
+  week_number_pattern: '第?\s*[零〇一二两三四五六七八九十\d]+'
+  week_range_sep: '[-~—–至到]'
+  week_row_markers: '导论|绪论|考试|复习|实践|实验|研讨|讨论|汇报|第?\s*[零〇一二两三四五六七八九十\d]+\s*[章节讲篇部分单元]'
+  week_column_labels: '周次|授课周次|教学周次|教学周|授课周'
+  meta_snippet_max_len: 500
+  apgs_context_before: 80
+  apgs_context_after: 160
+
+# ---------------- 融合打分设置 ----------------
+fusion_scoring:
+  teaching_content:
+    required: [序号, 主题, 知识点, 学时]
+    weighted: {}
+    min_rows: 2
+    min_improvement: 8.0
+  course_schedule:
+    required: [序号, 授课内容]
+    weighted:
+      授课方式: 15
+      思政元素的融入和预期教学成效: 25
+    min_rows: 3
+    min_improvement: 5.0
+  assessment_rows:
+    required: [考试形式, 占比]
+    weighted:
+      考察内容: 10
+      考察方式: 10
+    min_rows: 2
+    min_improvement: 3.0
+  course_requirements:
+    required: [要求类型, 要求内容]
+    weighted: {}
+    min_rows: 1
+    min_improvement: 8.0
+
+# ---------------- 候选源打分设置 ----------------
+candidate_scoring:
+  row_complete_weight: 50.0
+  weighted_field_weight: 30.0
+  row_bonus_cap: 20
+  warning_penalty: 5
+  default_min_improvement: 8.0
+
+# ---------------- 表格解析设置 ----------------
+table_parser:
+  pair_label_max_len: 24
+  header_drift_strict: 2
+  header_drift_relaxed: 1
+  min_table_cols: 2
+  header_scan_rows: 5
+  profile_scan_rows: 6
+
+# ---------------- OCR 质量评估设置 ----------------
+ocr_quality:
+  en_fragment_pattern: '\b[A-Za-z]{2,5}\b(?!\w)'
+  english_fragment_threshold: 0.35
+  english_fragment_penalty_factor: 40
+  english_fragment_penalty_cap: 25
+  glued_label_penalty_per_hit: 3
+  glued_label_penalty_cap: 15
+  empty_column_penalty: 8
+  rerun_score_threshold: 65
+  short_en_word_max_len: 4
+  min_en_letters_for_repair: 8
+  glued_label_patterns:
+    - '中文课程名称[\u4e00-\u9fa5A-Za-z]'
+    - '英文课程名称[A-Za-z]'
+    - '任课教师姓名[\u4e00-\u9fa5]'
+    - '开课（院）系[\u4e00-\u9fa5]'
+  empty_column_fields: [授课方式, 思政元素的融入和预期教学成效, 学时, 知识点]
+
+# ---------------- 告警级别设置 ----------------
+warning_severity:
+  missing_field: error
+  empty_section: error
+  overview_used_instead_of_table: info
+  validated_text_fallback_used: info
+  continued_table_without_header: info
+  alternative_candidate_selected: info
+  unknown_columns: warn
+  missing_required_columns: warn
+  missing_teaching_method: warn
+  text_row_low_confidence: warn
+  suspiciously_few_rows: warn
+  sanitized_control_chars: info
+  pymupdf_extract_failed: warn
+
+# ---------------- 审核文案设置 ----------------
+audit_messages:
+  fallback_reason: 模型未给出不通过原因，需人工复核
+  no_llm_suffix: ，需人工复核
+  empty_llm_reason: 模型返回为空，需人工复核
+  parse_error_reason: 模型输出格式无法解析，需人工复核
+  manual_review_suggestion: 配置 LLM 后重新审核，或进行人工复核。
+
+# ---------------- LLM 审核 content_layout 说明 ----------------
+content_layout_rules: |
+  content_layout 语义（audit_input.data 或 payload_data 各节内）：
+  - goals_only / table_only：主字段（分项目标或 tm 表格）已有实质内容；补充字段 mbgs/nrgs/apgs/khgs 为空表示无额外说明，属正常，不得因此判否。
+  - overview_only：无分项/表格，仅概述或补充文本，应基于 primary.supplement 或对应概述字段审核。
+  - goals_with_supplement / table_with_supplement：主字段与补充字段并存，均应作为证据。
+  - empty：主字段与补充均无实质内容，才可因缺失判否。
+  layout_note 是对当前 layout 的说明，请一并参考。

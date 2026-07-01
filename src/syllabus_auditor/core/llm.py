@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+"""OpenAI 兼容 LLM 客户端与调用轨迹记录。"""
+
+from __future__ import annotations
 
 import os
 from dataclasses import dataclass
@@ -7,7 +9,7 @@ from typing import Any
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from config import load_project_config
+from syllabus_auditor.shared.config import load_project_config
 from syllabus_auditor.core.db.connection import get_project_root
 
 
@@ -16,6 +18,17 @@ class LlmConfig:
     model: str
     api_key: str
     base_url: str | None = None
+
+
+class EmptyLlmResponseError(ValueError):
+    """LLM 返回空内容或仅空白字符。"""
+
+
+def ensure_nonempty_response(text: str) -> str:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        raise EmptyLlmResponseError("模型返回为空")
+    return cleaned
 
 
 class LlmClient:
@@ -48,7 +61,8 @@ class LlmClient:
             temperature=self._temperature,
             response_format=self._response_format,
         )
-        return response.choices[0].message.content or ""
+        content = response.choices[0].message.content or ""
+        return ensure_nonempty_response(content)
 
 
 def load_llm_client() -> LlmClient | None:

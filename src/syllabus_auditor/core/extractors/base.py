@@ -1,3 +1,5 @@
+"""抽取器抽象基类。"""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
